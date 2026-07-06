@@ -278,9 +278,8 @@ def get_host() -> str:
     return os.environ.get("RAILWAY_PUBLIC_DOMAIN", CONFIG["host"])
 
 def generate_uuid() -> str:
-    """Generate a real UUID v4."""
-    import uuid as _uuid
-    return str(_uuid.uuid4())
+    """Generate a 32-char hex identifier (no dashes) — compatible with Xray/VLESS configs."""
+    return secrets.token_hex(16)
     
 def now_ir() -> datetime:
     return datetime.now(IRAN_TZ)
