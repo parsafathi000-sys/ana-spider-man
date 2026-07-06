@@ -330,6 +330,7 @@ tr{animation:fadeIn .3s ease}
 /* Sidebar backdrop */
 .sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99}
 @media(max-width:900px){.sidebar-backdrop.show{display:block}}
+.sidebar-tog{display:none}@media(max-width:900px){.sidebar-tog{display:inline-flex!important}}
 
 </style>
 </head>
@@ -403,7 +404,7 @@ tr{animation:fadeIn .3s ease}
     <div class="topbar">
       <div class="topbar-greet" id="grt"></div>
       <div class="topbar-r">
-        <button class="btn btn-sm btn-g sidebar-tog" onclick="toggleSidebar()" style="display:none">☰</button>
+        <button class="btn btn-sm btn-g sidebar-tog" onclick="toggleSidebar()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
       </div>
     </div>
     <div class="content">
