@@ -512,27 +512,27 @@ def generate_user_config(user_id: str, user: dict, inbound_id: str = None) -> st
     # ── VLESS ──
     if protocol == "vless":
         if transport_type == "grpc":
-            params = f"encryption=none&security=tls&type=grpc&serviceName={stored_path}&host={host}&sni={sni}&fp=chrome&alpn=h2"
+            params = f"encryption=none&security=tls&type=grpc&serviceName={quote(stored_path, safe='')}&host={quote(host)}&sni={quote(sni)}&fp=chrome&alpn=h2"
             return f"vless://{config_uuid}@{host}:443?{params}#{remark}"
         elif transport_type == "tcp":
-            params = f"encryption=none&security=tls&type=tcp&host={host}&sni={sni}&fp=chrome&alpn=h2,http/1.1"
+            params = f"encryption=none&security=tls&type=tcp&host={quote(host)}&sni={quote(sni)}&fp=chrome&alpn=h2,http/1.1"
             return f"vless://{config_uuid}@{host}:443?{params}#{remark}"
         elif transport_type == "xhttp":
             extra = quote('{"xPaddingBytes":"100-1000","mode":"auto","scMaxEachPostBytes":"1000000"}', safe='')
-            params = f"encryption=none&security=tls&type=xhttp&host={host}&path={stored_path}&sni={sni}&fp=chrome&alpn=h2,http/1.1&mode=auto&extra={extra}"
+            params = f"encryption=none&security=tls&type=xhttp&host={quote(host)}&path={quote(stored_path, safe='')}&sni={quote(sni)}&fp=chrome&alpn=h2,http/1.1&mode=auto&extra={extra}"
             return f"vless://{config_uuid}@{host}:443?{params}#{remark}"
         else:  # ws — user's stored path (generated once at creation)
             ws_host = (inbound.get("domain") if inbound else None) or SETTINGS.get("domain") or host
             ws_sni = sni if sni and sni != host else ws_host
             params = "&".join([
-                f"encryption=none",
-                f"security=tls",
+                "encryption=none",
+                "security=tls",
                 f"type=ws",
-                f"host={ws_host}",
-                f"path={stored_path}",
-                f"sni={ws_sni}",
-                f"fp=chrome",
-                f"alpn=http/1.1",
+                f"host={quote(ws_host)}",
+                f"path={quote(stored_path, safe='')}",
+                f"sni={quote(ws_sni)}",
+                "fp=chrome",
+                "alpn=http/1.1",
             ])
             return f"vless://{config_uuid}@{ws_host}:443?{params}#{remark}"
 
@@ -2710,6 +2710,195 @@ async def bulk_create_users(request: Request, _=Depends(require_auth)):
     asyncio.create_task(save_state())
     log_activity("user", f"{count} کاربر به‌صورت انبوه ساخته شد", "ok")
     return {"ok": True, "created_count": len(created), "users": created}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# XRAY CORE CONFIG GENERATOR
+# ══════════════════════════════════════════════════════════════════════════════
+
+def generate_xray_server_config(inbound_id: str = None) -> dict:
+    """
+    Generate a complete Xray-core server config.json based on inbound settings.
+    Returns a dict that can be saved as config.json for Xray core.
+    """
+    inbound = None
+    if inbound_id:
+        inbound = INBOUNDS.get(inbound_id)
+    
+    host = SETTINGS.get("domain") or get_host()
+    xray_config = {
+        "log": {"loglevel": "warning"},
+        "inbounds": [],
+        "outbounds": [{"protocol": "freedom", "tag": "direct"}],
+        "routing": {
+            "domainStrategy": "IPIfNonMatch",
+            "rules": []
+        }
+    }
+    
+    if not inbound:
+        # Generate for all inbounds
+        for iid, ib in INBOUNDS.items():
+            _add_inbound_to_xray(xray_config, ib, iid, host)
+    else:
+        _add_inbound_to_xray(xray_config, inbound, inbound_id, host)
+    
+    return xray_config
+
+
+def _add_inbound_to_xray(cfg: dict, ib: dict, iid: str, host: str):
+    """Add a single inbound to an Xray config dict."""
+    protocol = ib.get("protocol", "vless")
+    port = int(ib.get("port", 443))
+    network = ib.get("network", "ws")
+    security = ib.get("security", "tls")
+    domain = ib.get("domain", host)
+    sni_val = ib.get("sni", domain)
+    fingerprint = ib.get("fingerprint", "chrome")
+    rs = ib.get("reality_settings", {}) if protocol == "reality" else {}
+    ws_settings = ib.get("ws_settings", {})
+    xh_settings = ib.get("xhttp_settings", {})
+    grpc_settings = ib.get("grpc_settings", {})
+    
+    inbound_obj = {
+        "tag": f"inbound-{iid}",
+        "port": port,
+        "protocol": protocol,
+        "settings": {"clients": [], "decryption": "none"},
+        "streamSettings": {}
+    }
+    
+    # Protocol-specific client settings
+    if protocol in ("vless", "vmess", "trojan"):
+        # Generate some default client entries
+        client_count = 10
+        clients = []
+        for i in range(client_count):
+            uid = generate_uuid()
+            client = {"id": uid}
+            if protocol == "vless":
+                client["flow"] = ""
+            elif protocol == "vmess":
+                client["alterId"] = 0
+            elif protocol == "trojan":
+                client["password"] = secrets.token_urlsafe(16)
+            clients.append(client)
+        inbound_obj["settings"]["clients"] = clients
+    
+    # Transport / Stream settings
+    if protocol == "reality":
+        inbound_obj["streamSettings"] = {
+            "network": network if network in ("tcp", "xhttp", "grpc") else "tcp",
+            "security": "reality",
+            "realitySettings": {
+                "show": False,
+                "dest": rs.get("dest", "is1-ssl.mzstatic.com:443"),
+                "xver": 0,
+                "serverNames": [rs.get("sni", "is1-ssl.mzstatic.com")],
+                "privateKey": rs.get("private_key", ""),
+                "shortIds": [rs.get("short_id", "5a3ff5a13d")],
+                "spiderX": rs.get("spiderx", "/"),
+            }
+        }
+        if network == "xhttp":
+            inbound_obj["streamSettings"]["xhttpSettings"] = {
+                "path": xh_settings.get("path", "/"),
+                "host": xh_settings.get("host", domain),
+                "mode": xh_settings.get("mode", "auto"),
+                "xPaddingBytes": xh_settings.get("xPaddingBytes", "100-1000"),
+                "scMaxEachPostBytes": xh_settings.get("scMaxEachPostBytes", "1000000"),
+                "scMaxBufferedPosts": xh_settings.get("scMaxBufferedPosts", 30),
+                "scStreamUpServerSecs": xh_settings.get("scStreamUpServerSecs", "20-80"),
+            }
+    elif security == "tls":
+        inbound_obj["streamSettings"] = {
+            "network": network,
+            "security": "tls",
+            "tlsSettings": {
+                "certificates": [{
+                    "certificateFile": "/etc/xray/cert.pem",
+                    "keyFile": "/etc/xray/key.pem"
+                }]
+            }
+        }
+        if network == "ws":
+            inbound_obj["streamSettings"]["wsSettings"] = {
+                "path": ws_settings.get("path", "/"),
+                "headers": {"Host": ws_settings.get("host", domain)}
+            }
+        elif network == "grpc":
+            inbound_obj["streamSettings"]["grpcSettings"] = {
+                "serviceName": grpc_settings.get("serviceName", "")
+            }
+        elif network == "xhttp":
+            inbound_obj["streamSettings"]["xhttpSettings"] = {
+                "path": xh_settings.get("path", "/"),
+                "host": xh_settings.get("host", domain),
+                "mode": xh_settings.get("mode", "auto"),
+                "xPaddingBytes": xh_settings.get("xPaddingBytes", "100-1000"),
+                "scMaxEachPostBytes": xh_settings.get("scMaxEachPostBytes", "1000000"),
+            }
+    else:
+        # No TLS (raw)
+        inbound_obj["streamSettings"] = {"network": network}
+        if network == "ws":
+            inbound_obj["streamSettings"]["wsSettings"] = {"path": ws_settings.get("path", "/")}
+    
+    # Add sniffing
+    inbound_obj["sniffing"] = {
+        "enabled": True,
+        "destOverride": ["http", "tls", "quic"]
+    }
+    
+    cfg["inbounds"].append(inbound_obj)
+
+
+@app.post("/api/tools/generate-xray-config")
+async def gen_xray_server_config(request: Request, _=Depends(require_auth)):
+    """Generate a complete Xray-core server config.json for all or specific inbounds."""
+    body = await request.json()
+    inbound_id = body.get("inbound_id") or None
+    
+    try:
+        config = generate_xray_server_config(inbound_id)
+        return {
+            "ok": True,
+            "config": config,
+            "config_json": json.dumps(config, indent=2, ensure_ascii=False),
+            "inbounds_count": len(config["inbounds"]),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tools/generate-xray-keys")
+async def gen_xray_keys(_=Depends(require_auth)):
+    """Generate all Xray-related keys: Reality x25519 keypair, UUID, shortId."""
+    result = {
+        "uuid": generate_uuid(),
+        "short_id": secrets.token_hex(5)[:10],
+    }
+    try:
+        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+        from cryptography.hazmat.primitives import serialization
+        priv = X25519PrivateKey.generate()
+        priv_bytes = priv.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        pub_bytes = priv.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        import base64 as b64
+        result["private_key"] = b64.b64encode(priv_bytes).decode()
+        result["public_key"] = b64.b64encode(pub_bytes).decode()
+    except ImportError:
+        result["private_key"] = ""
+        result["public_key"] = ""
+        result["note"] = "cryptography not installed"
+    return result
 
 
 # ══════════════════════════════════════════════════════════════════════════════
