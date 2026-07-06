@@ -33,7 +33,7 @@
 [data-theme="light"]:not([data-accent]){--bg:#f5f5f9;--bg2:#fff;--bg3:#e8e8f0;--txt:#1a1a2e;--txt2:#666680;--neon:#d50000;--bg-opacity:0.04;--glow:0 0 20px rgba(255,23,68,.08)}
 [data-theme="light"][data-accent="green"]{--bg:#f0f4f0;--bg2:#fff;--bg3:#e0f0e0;--txt:#0a1a0a;--txt2:#558855;--neon:#0a0;--bg-opacity:0.04;--glow:0 0 24px rgba(0,170,0,.08)}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--txt);overflow-x:hidden}@media(max-width:900px){.bg-wrap{background-position:center center!important}body{font-size:14px}input,select,button{font-size:16px!important}.btn{padding:10px 14px;font-size:12px}.btn-sm{padding:6px 10px;font-size:11px}td,th{padding:8px 4px;font-size:10px}.stat{padding:12px 8px}.stat-v{font-size:18px}.modal-c{max-width:95vw;padding:16px}.panel{padding:12px}.topbar{padding:10px 12px}.content{padding:10px}.stats{grid-template-columns:repeat(2,1fr);gap:8px}.main-area{margin-right:0}}@media(max-width:900px){.bg-wrap{background-position:center center!important}body{font-size:14px}.btn{padding:8px 12px;font-size:11px}.btn-sm{padding:4px 8px;font-size:10px}td,th{padding:8px 6px;font-size:11px}}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--txt);overflow-x:hidden}@media(max-width:900px){.bg-wrap{position:fixed;inset:0;background-image:url(/static/bg.jpg);background-position:center center;background-size:cover;background-repeat:no-repeat;z-index:0;pointer-events:none}body{font-size:14px}input,select,button{font-size:16px!important}.btn{padding:10px 14px;font-size:12px}.btn-sm{padding:6px 10px;font-size:11px}td,th{padding:8px 4px;font-size:10px}.stat{padding:12px 8px}.stat-v{font-size:18px}.modal-c{max-width:95vw;padding:16px}.panel{padding:12px}.topbar{padding:10px 12px}.content{padding:10px}.stats{grid-template-columns:repeat(2,1fr);gap:8px}.main-area{margin-right:0}}@media(max-width:900px){.bg-wrap{position:fixed;inset:0;background-image:url(/static/bg.jpg);background-position:center center;background-size:cover;background-repeat:no-repeat;z-index:0;pointer-events:none}body{font-size:14px}.btn{padding:8px 12px;font-size:11px}.btn-sm{padding:4px 8px;font-size:10px}td,th{padding:8px 6px;font-size:11px}}
 ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--neon);border-radius:4px}
 
 /* Login */
@@ -220,8 +220,6 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <!-- ═══ USERS ═══ -->
       <div id="tab-users" class="tab-content hidden">
         <div class="panel"><div class="panel-h"><span class="glow">مدیریت کاربران</span><button class="btn btn-p btn-sm" onclick="openCreateUser()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> کاربر جدید</button></div><div class="tbl"><table><thead><tr><th>نام</th><th>پروتکل</th><th>مصرف</th><th>اعتبار</th><th>وضعیت</th><th>ساب</th><th>عملیات</th></tr></thead><tbody id="tbl-users2"><tr><td colspan="7"><div class="empty">در حال بارگذاری...</div></td></tr></tbody></table></div></div>
-        <!-- ═══ SUBS ═══ -->
-        <div class="panel sub-panel"><div class="panel-h"><span class="glow">اشتراک‌ها (Subscriptions)</span></div><div id="subs-c2"><div class="empty">در حال بارگذاری...</div></div></div>
       </div>
       <!-- ═══ SPIDER IP ═══ -->
       <div id="tab-spider-ip" class="tab-content hidden">
@@ -370,50 +368,7 @@ async function doLogout(){await fetch('/api/logout',{method:'POST'});$id('app-wr
 async function showApp(){$id('login-wrap').style.display='none';$id('app-wrap').classList.add('active');
   var h=new Date().getHours(),g='';if(h<6)g='شب بخیر';else if(h<12)g='صبح بخیر';else if(h<18)g='ظهر بخیر';else g='عصر بخیر';
   $id('grt').innerHTML='<strong>'+g+'</strong> 👋 به Spider Panel خوش آمدید';loadAll();setInterval(loadStats,30000)}
-async function loadAll(){loadStats();loadUsers();loadSubsData()}
-// ═══════ SUBS ═══════
-var subsData=[];
-async function loadSubsData(){try{var d=await api('/api/users');subsData=d.users||[];renderSubCards()}catch(e){$id('subs-c2').innerHTML='<div class="empty">خطا</div>'}}
-function renderSubCards(){
-  var el=$id('subs-c2'),host=window.location.origin;
-  if(!subsData.length){el.innerHTML='<div class="empty">هیچ اشتراکی نیست - اول کاربر بسازید</div>';return}
-  el.innerHTML=subsData.map(function(u){
-    var used=u.traffic_used_bytes||0,limit=u.traffic_limit_bytes||0,pct=limit>0?Math.min(100,used/limit*100):0;
-    var days=u.expire_days,cl=days===null?'live':days>7?'live':'dead',dtxt=days===null?'نامحدود':days+' روز';
-    var init=u.username.charAt(0).toUpperCase(),proto=(u.protocol||'vless').toUpperCase();
-    var subUrl=host+'/sub-sync/sub/'+u.username;
-    return '<div class="subc">'+
-      '<div class="subc-h"><div class="subc-av">'+init+'</div><div class="subc-info"><div class="subc-nm">'+esc(u.username)+'</div><div class="subc-pr">'+proto+'</div></div><div class="subc-badges"><span class="subc-badge '+cl+'">'+dtxt+'</span></div></div>'+
-      '<div class="subc-body">'+
-        '<div class="subc-pbar"><div class="subc-pbar-h"><span>'+pct.toFixed(1)+'%</span><strong>'+fm(used)+' / '+(limit>0?fm(limit):'∞')+'</strong></div><div class="subc-pbar-bg"><div class="subc-pbar-f" style="width:'+pct+'%"></div></div></div>'+
-        '<input class="subc-cfg" readonly value="'+subUrl+'" onclick="this.select()" spellcheck="false">'+
-        '<div class="subc-acts">'+
-          '<button class="btn btn-n btn-sm" onclick="navigator.clipboard.writeText(\''+subUrl+'\');toast(\'لینک کپی شد\',\'ok\')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> کپی</button>'+
-          '<button class="btn btn-b btn-sm" onclick="window.open(\'/sub/'+u.username+'\',\'_blank\')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> باز</button>'+
-          '<button class="btn btn-g btn-sm" onclick="pingSub(\''+u.username+'\',this)">Ping</button>'+
-        '</div>'+
-        '<div class="subc-apps"><div class="subc-apps-title">Quick Import</div><div class="subc-app-grid">'+
-          '<a class="subc-app" href="v2rayng://install-sub?url='+encodeURIComponent(subUrl)+'" target="_blank"><div class="subc-app-ic" style="background:rgba(0,230,118,.2);color:var(--green)">A</div>v2rayNG</a>'+
-          '<a class="subc-app" href="streisand://import/'+encodeURIComponent(subUrl)+'" target="_blank"><div class="subc-app-ic" style="background:rgba(124,77,255,.2);color:var(--purple)">S</div>Streisand</a>'+
-          '<a class="subc-app" href="hiddify://import/'+encodeURIComponent(subUrl)+'" target="_blank"><div class="subc-app-ic" style="background:rgba(68,138,255,.2);color:var(--blue)">H</div>Hiddify</a>'+
-          '<a class="subc-app" href="clash://install-config?url='+encodeURIComponent(subUrl)+'" target="_blank"><div class="subc-app-ic" style="background:rgba(255,171,0,.2);color:var(--gold)">C</div>Clash</a>'+
-        '</div></div>'+
-      '</div></div>';
-  }).join('')
-}
-async function pingSub(uname,btn){
-  if(btn.disabled)return;btn.disabled=true;var orig=btn.textContent;btn.textContent='...';
-  var t0=Date.now();
-  try{var r=await fetch('/sub/'+uname+'/ping',{cache:'no-store'});if(!r.ok)throw new Error('fail');var ms=Date.now()-t0;
-    var par=btn.parentElement.parentElement,cv=par.querySelector('.subc-ping-val');
-    if(!cv){cv=document.createElement('div');cv.className='subc-ping-val';btn.parentElement.parentElement.appendChild(cv)}
-    cv.textContent=ms+' ms';cv.className='subc-ping-val '+(ms<150?'fast':ms<400?'mid':'slow')
-  }catch(e){
-    btn.textContent='ERR';btn.style.background='var(--red)';
-  }
-  if(!e)setTimeout(function(){btn.disabled=false;btn.textContent=orig},2000)
-}
-
+async function loadAll(){loadStats();loadUsers()}
 // ═══════ NAV ═══════
 function switchTab(tab,el){document.querySelectorAll('.nav-item').forEach(function(n){n.classList.remove('active')});if(el)el.classList.add('active');document.querySelectorAll('.tab-content').forEach(function(t){t.classList.add('hidden')});var t=$id('tab-'+tab);if(t){t.classList.remove('hidden');if(tab==='tools'){loadConnectionModes();loadRealitySettings()}}}
 
