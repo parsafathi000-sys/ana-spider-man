@@ -86,6 +86,34 @@ async def load_state():
             logger.info(f"State loaded: {len(LINKS)} links, {len(SUBS)} subs, {len(USERS)} users, {len(GROUPS)} groups, {len(IP_POOL)} ips, {len(INBOUNDS)} inbounds")
     except Exception as e:
         logger.warning(f"Could not load state: {e}")
+    # Rebuild path index from all users and links
+    _rebuild_path_index()
+
+
+def _rebuild_path_index():
+    """Rebuild PATH_INDEX from all USERS and LINKS with stored paths."""
+    PATH_INDEX.clear()
+    # From users
+    for uid, u in USERS.items():
+        path = (u.get("path") or "").strip().lstrip("/")
+        config_uuid = u.get("config_uuid") or uid
+        if path:
+            PATH_INDEX[path] = config_uuid
+            logger.debug(f"PATH_INDEX: /{path} -> user:{config_uuid[:8]}...")
+    # From legacy links (stored their UUID as path)
+    for lid, link in LINKS.items():
+        link_path = (link.get("path") or "").strip().lstrip("/")
+        if link_path:
+            PATH_INDEX[link_path] = lid
+    # Also index legacy ws paths from users (backward compat)
+    for uid, u in USERS.items():
+        config_uuid = u.get("config_uuid") or uid
+        # If config uses the old /ws/{uuid} format, index by uuid too
+        stored_path = (u.get("path") or "").strip().lstrip("/")
+        if not stored_path:
+            # No path set, still index by config_uuid for backward compat
+            PATH_INDEX[config_uuid] = config_uuid
+    logger.info(f"PATH_INDEX rebuilt: {len(PATH_INDEX)} entries")
 
 async def save_state():
     async with SAVE_LOCK:
@@ -125,6 +153,8 @@ hourly_traffic: dict = defaultdict(int)
 http_client: httpx.AsyncClient | None = None
 LINKS: dict = {}
 LINKS_LOCK = asyncio.Lock()
+PATH_INDEX: dict = {}          # random_path -> uuid
+PATH_INDEX_LOCK = asyncio.Lock()
 SUBS: dict = {}
 SUBS_LOCK = asyncio.Lock()
 USERS: dict = {}
@@ -487,10 +517,10 @@ def generate_user_config(user_id: str, user: dict, inbound_id: str = None) -> st
         reality_pbk = rs.get("public_key", "")
         reality_sid = rs.get("short_id", "5a3ff5a13d")
         reality_spx = rs.get("spiderx", "/")
-        reality_fp = inbound.get("fingerprint") or rs.get("fingerprint", "chrome")
+        reality_fp = (inbound.get("fingerprint") if inbound else None) or rs.get("fingerprint", "chrome")
         sni_reality = sni if sni and sni != host else rs.get("sni", "is1-ssl.mzstatic.com")
-        ext_domain = inbound.get("external_domain") or inbound.get("domain") or rs.get("external_domain") or host
-        ext_port = inbound.get("external_port") or rs.get("external_port", 443) or 443
+        ext_domain = (inbound.get("external_domain") if inbound else None) or (inbound.get("domain") if inbound else None) or rs.get("external_domain") or host
+        ext_port = (inbound.get("external_port") if inbound else None) or rs.get("external_port", 443) or 443
         if not reality_pbk or not reality_sid:
             return f"vless://{config_uuid}@{ext_domain}:{ext_port}?encryption=none&security=reality&sni={quote(sni_reality)}&fp={reality_fp}&pbk=MISSING_PBK&sid=MISSING_SID&type=tcp#{remark}"
         rpath = stored_path if stored_path else xs.get("path", "/")
@@ -513,8 +543,8 @@ def generate_user_config(user_id: str, user: dict, inbound_id: str = None) -> st
 
     # ── VLESS ──
     if protocol == "vless":
-        vless_host = inbound.get("external_domain") or inbound.get("domain") or host
-        vless_port = inbound.get("external_port") or inbound.get("port") or 443
+        vless_host = (inbound.get("external_domain") if inbound else None) or (inbound.get("domain") if inbound else None) or host
+        vless_port = (inbound.get("external_port") if inbound else None) or (inbound.get("port") if inbound else None) or 443
         if transport_type == "grpc":
             params = f"encryption=none&security=tls&type=grpc&serviceName={quote(stored_path, safe='')}&host={quote(vless_host)}&sni={quote(sni)}&fp=chrome&alpn=h2"
             return f"vless://{config_uuid}@{vless_host}:{vless_port}?{params}#{remark}"
@@ -538,8 +568,8 @@ def generate_user_config(user_id: str, user: dict, inbound_id: str = None) -> st
                 "fp=chrome",
                 "alpn=http/1.1",
             ])
-            vless_host = inbound.get("external_domain") or inbound.get("domain") or ws_host
-            vless_port = inbound.get("external_port") or inbound.get("port") or 443
+            vless_host = (inbound.get("external_domain") if inbound else None) or (inbound.get("domain") if inbound else None) or ws_host
+            vless_port = (inbound.get("external_port") if inbound else None) or (inbound.get("port") if inbound else None) or 443
             return f"vless://{config_uuid}@{vless_host}:{vless_port}?{params}#{remark}"
 
     # ── VMess ──
@@ -1142,8 +1172,37 @@ try:
         relay_tcp_to_ws,
         websocket_tunnel,
     )
+    # Old route: /ws/{uuid} — backward compatible
     app.add_api_websocket_route("/ws/{uuid}", websocket_tunnel)
-    logger.info("VLESS Relay module loaded")
+
+    # New catch-all route: resolves random paths via PATH_INDEX
+    @app.websocket("/{path:path}")
+    async def ws_path_resolver(ws: WebSocket, path: str):
+        # Skip static files, api, and known routes
+        if path.startswith(("static/", "api/", "ws/", "sub/", "p/", "sub-group/", "xhttp-")):
+            await ws.close(code=1008, reason="invalid route")
+            return
+        # Strip path for lookup
+        clean_path = path.strip("/")
+        # Try PATH_INDEX first (random path -> uuid)
+        async with PATH_INDEX_LOCK:
+            resolved_uuid = PATH_INDEX.get(clean_path)
+        if resolved_uuid:
+            await websocket_tunnel(ws, resolved_uuid)
+            return
+        # Fallback: try as direct UUID (for legacy clients)
+        import re
+        if re.match(r'^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$', clean_path, re.I):
+            await websocket_tunnel(ws, clean_path)
+            return
+        if re.match(r'^[0-9a-f]{8,64}$', clean_path, re.I):
+            await websocket_tunnel(ws, clean_path)
+            return
+        # Not found
+        logger.warning(f"WS rejected: unknown path /{clean_path}")
+        await ws.close(code=1008, reason="unknown path")
+
+    logger.info("VLESS Relay module loaded (WS: /ws/{uuid} + catch-all)")
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"VLESS Relay module not available: {e}")
 
@@ -1458,6 +1517,12 @@ async def create_user(request: Request, _=Depends(require_auth)):
             "transport_type": transport_type,
             "inbound_id": inbound_id,
         }
+        # Register path in PATH_INDEX for WebSocket resolution
+        _path = USERS[user_id].get("path", "").strip().lstrip("/")
+        if _path:
+            PATH_INDEX[_path] = config_uuid
+        # Also index by config_uuid for backward compat
+        PATH_INDEX[config_uuid] = config_uuid
 
     asyncio.create_task(save_state())
     log_activity("user", f"کاربر «{username}» با پروتکل {protocol} ساخته شد", "ok")
@@ -1528,7 +1593,14 @@ async def edit_user(user_id: str, request: Request, _=Depends(require_auth)):
         if "sni" in body:
             u["sni"] = str(body["sni"]).strip()
         if "path" in body:
-            u["path"] = str(body["path"]).strip()
+            # Update PATH_INDEX when path changes
+            old_path = (u.get("path") or "").strip().lstrip("/")
+            new_path = str(body["path"]).strip().lstrip("/")
+            u["path"] = new_path
+            if old_path:
+                PATH_INDEX.pop(old_path, None)
+            if new_path:
+                PATH_INDEX[new_path] = u.get("config_uuid", user_id)
         if "transport_type" in body:
             u["transport_type"] = str(body["transport_type"]).strip().lower()
         if "concurrent_connections" in body:
@@ -1557,6 +1629,10 @@ async def delete_user(user_id: str, _=Depends(require_auth)):
         if not u:
             raise HTTPException(status_code=404, detail="user not found")
         username = u.get("username", user_id)
+        # Clean up PATH_INDEX
+        old_path = (u.get("path") or "").strip().lstrip("/")
+        if old_path:
+            PATH_INDEX.pop(old_path, None)
         USERS.pop(user_id, None)
     asyncio.create_task(save_state())
     log_activity("user", f"کاربر «{username}» حذف شد", "err")

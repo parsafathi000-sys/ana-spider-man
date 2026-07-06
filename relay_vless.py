@@ -79,11 +79,12 @@ async def parse_vless_header(chunk: bytes):
     return command, address, port, chunk[pos:]
 
 async def check_and_use(uid: str, n: int) -> bool:
-    async with LINKS_LOCK:
-        link = LINKS.get(uid)
+    m = _get_main()
+    async with m.LINKS_LOCK:
+        link = m.LINKS.get(uid)
         if link is None:
             return False
-        if not _is_link_allowed(link):
+        if not m.is_link_allowed(link):
             return False
         link["used_bytes"] += n
         stats["total_bytes"] += n
@@ -138,11 +139,12 @@ async def relay_tcp_to_ws(ws: WebSocket, reader: asyncio.StreamReader, conn_id: 
 
 async def websocket_tunnel(ws: WebSocket, uuid: str):
     await ws.accept()
+    m = _get_main()
 
-    async with LINKS_LOCK:
-        link = LINKS.get(uuid)
+    async with m.LINKS_LOCK:
+        link = m.LINKS.get(uuid)
 
-    if not _is_link_allowed(link):
+    if not m.is_link_allowed(link):
         logger.warning(f"ðŸš« WS rejected uuid={uuid[:8]}â€¦ (not allowed)")
         await ws.close(code=1008, reason="not authorized")
         return

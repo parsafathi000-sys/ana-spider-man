@@ -30,4 +30,9 @@ SESSIONS_LOCK = asyncio.Lock()
 GROUPS_LOCK = asyncio.Lock()
 INBOUNDS: dict = {}  # inbound_id -> {name, protocol, port, network, security, domain, sni, external_port, fingerprint, reality_settings, xhttp_settings, created_at}
 INBOUNDS_LOCK = asyncio.Lock()
+
+# ── Path to UUID index (maps random paths like /abc123 to user/link UUIDs) ──
+PATH_INDEX: dict = {}  # stripped_path -> {"uuid": str, "type": "user"|"link"}
+PATH_INDEX_LOCK = asyncio.Lock()
+
 IP_LOCK = threading.Lock()
