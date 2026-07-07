@@ -1164,32 +1164,6 @@ function populateInboundSelects() {
   if (sel) sel.innerHTML = opts;
 }
 
-  $id('ib-title').textContent = 'ایجاد اینباند جدید';
-  $id('ib-id').value = '';
-  $id('ib-name').value = '';
-  $id('ib-proto').value = 'vless';
-  $id('ib-port').value = '';
-  $id('ib-extport').value = '';
-  $id('ib-domain').value = '';
-  $id('ib-sni').value = '';
-  $id('ib-network').value = 'ws';
-  $id('ib-security').value = 'tls';
-  $id('ib-fingerprint').value = 'chrome';
-  $id('ib-privkey').value = '';
-  $id('ib-pubkey').value = '';
-  $id('ib-shortids').value = '';
-  $id('ib-spiderx').value = '/';
-  $id('ib-extdomain').value = '';
-  $id('ib-extport').value = '443';
-  $id('ib-dest').value = 'is1-ssl.mzstatic.com:443';
-  $id('ib-servernames').value = 'is1-ssl.mzstatic.com';
-  $id('ib-submit').textContent = 'ایجاد اینباند';
-  onInboundProtoChange();
-  openModal('mod-inbound');
-}
-
-
-
 function onInboundProtoChange() {
   var p = $id('ib-proto').value;
   var secWrap = $id('ib-sec-wrap');
