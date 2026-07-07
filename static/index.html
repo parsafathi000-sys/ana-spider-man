@@ -1114,8 +1114,6 @@ async function viewCfg(uid) {
   } catch(e) { toast(e.message, 'err'); }
 }
 
-  navigator.clipboard.writeText(curCfg).then(function() { toast('کانفیگ کپی شد', 'ok'); }).catch(function() { toast('خطا در کپی', 'err'); });
-}
 
 function viewSub(username) { window.open('/sub/' + username, '_blank'); }
 function viewQR(userId) { $id('qr-img').src = '/api/users/' + userId + '/qr?t=' + Date.now(); openModal('mod-qr'); }
