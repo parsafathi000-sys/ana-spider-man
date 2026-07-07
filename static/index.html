@@ -582,6 +582,11 @@ tr{animation:fadeIn .3s ease}
             <button class="btn btn-sm btn-b" onclick="xrayAction('restart')">Restart</button>
           </div>
           <div id="xray-info" style="font-size:11px;color:var(--txt2)"></div>
+          <div style="margin-top:8px">
+            <button class="btn btn-sm btn-g" onclick="loadXrayTraffic()">📊 آمار واقعی</button>
+            <button class="btn btn-sm btn-g" onclick="syncXrayTraffic()">🔄 Sync</button>
+          </div>
+          <div id="xray-traffic" style="font-size:11px;color:var(--txt2);margin-top:6px;max-height:200px;overflow-y:auto"></div>
           <div id="xray-log" style="font-family:monospace;font-size:10px;color:var(--txt2);max-height:150px;overflow-y:auto;background:var(--bg3);border-radius:8px;padding:8px;margin-top:8px;display:none;direction:ltr;text-align:left"></div>
         </div>
       </div>
@@ -1740,6 +1745,48 @@ async function loadXrayLogs() {
 // Auto-update Xray status every 30s
 setInterval(updateXrayStatus, 30000);
 setTimeout(updateXrayStatus, 2000);
+
+async function loadXrayTraffic() {
+  var el = $id('xray-traffic');
+  el.textContent = 'در حال دریافت...';
+  try {
+    var r = await api('/api/xray/traffic');
+    if (r.ok && r.users && Object.keys(r.users).length > 0) {
+      var html = '<table style="width:100%;border-collapse:collapse"><tr style="color:var(--neon);font-weight:700"><td>کاربر</td><td>آپلود</td><td>دانلود</td><td>کل</td></tr>';
+      var totalUp = 0, totalDown = 0;
+      Object.keys(r.users).forEach(function(email) {
+        var d = r.users[email];
+        var up = d.uplink || 0, down = d.downlink || 0;
+        totalUp += up; totalDown += down;
+        html += '<tr><td>' + email.substring(0,12) + '...</td><td>' + fmtBytesJS(up) + '</td><td>' + fmtBytesJS(down) + '</td><td>' + fmtBytesJS(up+down) + '</td></tr>';
+      });
+      html += '<tr style="color:var(--gold);font-weight:700"><td>مجموع</td><td>' + fmtBytesJS(totalUp) + '</td><td>' + fmtBytesJS(totalDown) + '</td><td>' + fmtBytesJS(totalUp+totalDown) + '</td></tr>';
+      html += '</table>';
+      el.innerHTML = html;
+    } else {
+      el.textContent = r.count === 0 ? 'هنوز ترافیکی ثبت نشده' : 'خطا';
+    }
+  } catch(e) {
+    el.textContent = 'Xray در حال اجرا نیست یا API غیرفعال است';
+  }
+}
+
+async function syncXrayTraffic() {
+  try {
+    var r = await api('/api/xray/traffic/sync', {method: 'POST'});
+    toast(r.message || 'Sync done', 'ok');
+    loadXrayTraffic();
+  } catch(e) {
+    toast(e.message, 'err');
+  }
+}
+
+function fmtBytesJS(b) {
+  if (!b || b === 0) return '0 B';
+  var u = ['B','KB','MB','GB','TB'];
+  var i = Math.floor(Math.log(b) / Math.log(1024));
+  return (b / Math.pow(1024, i)).toFixed(1) + ' ' + u[i];
+}
 
 </script>
 </body>

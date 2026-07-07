@@ -3253,76 +3253,125 @@ def generate_xray_server_config(inbound_id: str = None) -> dict:
     inbound = None
     if inbound_id:
         inbound = INBOUNDS.get(inbound_id)
-    
-    host = SETTINGS.get("domain") or get_host()
+
+    inbound_list = []
+    if not inbound:
+        for iid, ib in INBOUNDS.items():
+            obj = _build_xray_inbound(ib, iid)
+            if obj:
+                inbound_list.append(obj)
+    else:
+        obj = _build_xray_inbound(inbound, inbound_id)
+        if obj:
+            inbound_list.append(obj)
+
+    # Stats API inbound (loopback only) — so panel can query real traffic
+    stats_api = {
+        "tag": "api",
+        "listen": "127.0.0.1",
+        "port": 10085,
+        "protocol": "dokodemo-door",
+        "settings": {"address": "127.0.0.1"},
+    }
+    inbound_list.append(stats_api)
+
     xray_config = {
         "log": {"loglevel": "warning"},
-        "inbounds": [],
-        "outbounds": [{"protocol": "freedom", "tag": "direct"}],
+        "api": {
+            "tag": "api",
+            "services": ["HandlerService", "LoggerService", "StatsService"],
+        },
+        "stats": {},
+        "policy": {
+            "levels": {"0": {"statsUserUplink": True, "statsUserDownlink": True}},
+            "system": {"statsInboundUplink": True, "statsInboundDownlink": True},
+        },
+        "inbounds": inbound_list,
+        "outbounds": [
+            {"protocol": "freedom", "tag": "direct"},
+        ],
         "routing": {
             "domainStrategy": "IPIfNonMatch",
-            "rules": []
-        }
+            "rules": [
+                {"type": "field", "inboundTag": ["api"], "outboundTag": "api", "domain": ["127.0.0.1"]},
+            ],
+        },
     }
-    
-    if not inbound:
-        # Generate for all inbounds
-        for iid, ib in INBOUNDS.items():
-            _add_inbound_to_xray(xray_config, ib, iid, host)
-    else:
-        _add_inbound_to_xray(xray_config, inbound, inbound_id, host)
-    
     return xray_config
 
 
-def _add_inbound_to_xray(cfg: dict, ib: dict, iid: str, host: str):
-    """Add a single inbound to an Xray config dict."""
-    protocol = ib.get("protocol", "vless")
+def _build_xray_inbound(ib: dict, iid: str) -> dict | None:
+    """Build a single Xray inbound dict from panel inbound settings."""
+    security = ib.get("security", "tls")
+    is_reality = (security == "reality" or ib.get("protocol") == "reality")
+
+    # Xray-core protocol: Reality is a transport layer — underlying protocol
+    # is always vless (or trojan). We default to vless.
+    if is_reality:
+        protocol = "vless"
+    else:
+        protocol = ib.get("protocol", "vless")
+        if protocol not in ("vless", "vmess", "trojan"):
+            return None  # skip unsupported
+
     port = int(ib.get("port", 443))
     network = ib.get("network", "ws")
-    security = ib.get("security", "tls")
-    domain = ib.get("domain", host)
+    domain = ib.get("domain", "")
     sni_val = ib.get("sni", domain)
     fingerprint = ib.get("fingerprint", "chrome")
-    rs = ib.get("reality_settings", {}) if protocol == "reality" else {}
+    rs = ib.get("reality_settings", {}) if is_reality else {}
     ws_settings = ib.get("ws_settings", {})
     xh_settings = ib.get("xhttp_settings", {})
     grpc_settings = ib.get("grpc_settings", {})
-    
+
+    # Build client list from ACTUAL panel users assigned to this inbound
+    clients = []
+    for uid, u in USERS.items():
+        if u.get("inbound_id") == iid:
+            cuuid = u.get("config_uuid") or uid
+            c = {"id": cuuid, "email": uid}
+            if protocol == "vless":
+                c["flow"] = ""
+            elif protocol == "vmess":
+                c["alterId"] = 0
+            elif protocol == "trojan":
+                c["password"] = u.get("password_raw", secrets.token_urlsafe(16))
+            clients.append(c)
+
+    # If no real clients yet, add a placeholder so Xray doesn't reject the config
+    if not clients:
+        placeholder_id = generate_uuid()
+        c = {"id": placeholder_id, "email": f"placeholder-{iid}"}
+        if protocol == "vless":
+            c["flow"] = ""
+        elif protocol == "vmess":
+            c["alterId"] = 0
+        elif protocol == "trojan":
+            c["password"] = secrets.token_urlsafe(16)
+        clients.append(c)
+
     inbound_obj = {
         "tag": f"inbound-{iid}",
+        "listen": "0.0.0.0",
         "port": port,
         "protocol": protocol,
-        "settings": {"clients": [], "decryption": "none"},
-        "streamSettings": {}
+        "settings": {"clients": clients, "decryption": "none"},
+        "streamSettings": {},
+        "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"]},
     }
-    
-    # Protocol-specific client settings
-    if protocol in ("vless", "vmess", "trojan"):
-        # Generate some default client entries
-        client_count = 10
-        clients = []
-        for i in range(client_count):
-            uid = generate_uuid()
-            client = {"id": uid}
-            if protocol == "vless":
-                client["flow"] = ""
-            elif protocol == "vmess":
-                client["alterId"] = 0
-            elif protocol == "trojan":
-                client["password"] = secrets.token_urlsafe(16)
-            clients.append(client)
-        inbound_obj["settings"]["clients"] = clients
-    
-    # Transport / Stream settings
-    if protocol == "reality":
-        # Determine serverNames: prefer array from server_names, fall back to sni string
-        sn = rs.get("server_names")
-        if not sn or (isinstance(sn, list) and len(sn) == 0):
-            default_sni = rs.get("sni", "is1-ssl.mzstatic.com")
-            sn = [default_sni]
-        elif isinstance(sn, str):
-            sn = [sn]
+
+    # ── Stream / Security settings ──
+    if is_reality:
+        sn_raw = rs.get("server_names")
+        if not sn_raw or (isinstance(sn_raw, list) and len(sn_raw) == 0):
+            sn_raw = [rs.get("sni", "is1-ssl.mzstatic.com")]
+        elif isinstance(sn_raw, str):
+            sn_raw = [sn_raw]
+
+        pk = rs.get("private_key", "")
+        if not pk:
+            logger.warning(f"Xray inbound {iid}: missing privateKey — Reality won't work")
+
         inbound_obj["streamSettings"] = {
             "network": network if network in ("tcp", "xhttp", "grpc") else "tcp",
             "security": "reality",
@@ -3330,12 +3379,12 @@ def _add_inbound_to_xray(cfg: dict, ib: dict, iid: str, host: str):
                 "show": False,
                 "dest": rs.get("dest", "is1-ssl.mzstatic.com:443"),
                 "xver": 0,
-                "serverNames": sn,
-                "privateKey": rs.get("private_key", ""),
+                "serverNames": sn_raw,
+                "privateKey": pk,
                 "shortIds": [rs.get("short_id", "5a3ff5a13d")],
                 "fingerprint": "chrome",
                 "spiderX": rs.get("spiderx", "/"),
-            }
+            },
         }
         if network == "xhttp":
             inbound_obj["streamSettings"]["xhttpSettings"] = {
@@ -3347,47 +3396,35 @@ def _add_inbound_to_xray(cfg: dict, ib: dict, iid: str, host: str):
                 "scMaxBufferedPosts": xh_settings.get("scMaxBufferedPosts", 30),
                 "scStreamUpServerSecs": xh_settings.get("scStreamUpServerSecs", "20-80"),
             }
+
     elif security == "tls":
         inbound_obj["streamSettings"] = {
             "network": network,
             "security": "tls",
-            "tlsSettings": {
-                "certificates": [{
-                    "certificateFile": "/etc/xray/cert.pem",
-                    "keyFile": "/etc/xray/key.pem"
-                }]
-            }
+            "tlsSettings": {"certificates": [{"certificateFile": "/etc/xray/cert.pem", "keyFile": "/etc/xray/key.pem"}]},
         }
         if network == "ws":
             inbound_obj["streamSettings"]["wsSettings"] = {
                 "path": ws_settings.get("path", "/"),
-                "headers": {"Host": ws_settings.get("host", domain)}
-            }
-        elif network == "grpc":
-            inbound_obj["streamSettings"]["grpcSettings"] = {
-                "serviceName": grpc_settings.get("serviceName", "")
+                "headers": {"Host": ws_settings.get("host", domain)},
             }
         elif network == "xhttp":
             inbound_obj["streamSettings"]["xhttpSettings"] = {
                 "path": xh_settings.get("path", "/"),
                 "host": xh_settings.get("host", domain),
                 "mode": xh_settings.get("mode", "auto"),
-                "xPaddingBytes": xh_settings.get("xPaddingBytes", "100-1000"),
-                "scMaxEachPostBytes": xh_settings.get("scMaxEachPostBytes", "1000000"),
             }
+        elif network == "grpc":
+            inbound_obj["streamSettings"]["grpcSettings"] = {
+                "serviceName": grpc_settings.get("serviceName", ""),
+            }
+
     else:
-        # No TLS (raw)
         inbound_obj["streamSettings"] = {"network": network}
         if network == "ws":
             inbound_obj["streamSettings"]["wsSettings"] = {"path": ws_settings.get("path", "/")}
-    
-    # Add sniffing
-    inbound_obj["sniffing"] = {
-        "enabled": True,
-        "destOverride": ["http", "tls", "quic"]
-    }
-    
-    cfg["inbounds"].append(inbound_obj)
+
+    return inbound_obj
 
 
 @app.post("/api/tools/generate-xray-config")
@@ -3817,6 +3854,32 @@ async def xray_server_config(_=Depends(require_auth)):
         with open(XRAY_CONFIG_PATH, "r", encoding="utf-8") as f:
             config = json.loads(f.read())
         return {"ok": True, "config": config, "config_json": json.dumps(config, indent=2, ensure_ascii=False)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/xray/traffic")
+async def xray_traffic(_=Depends(require_auth)):
+    """Get real-time per-user traffic stats from Xray-core."""
+    try:
+        from xray_manager import query_traffic_stats
+        stats = await query_traffic_stats()
+        return {"ok": True, "users": stats, "count": len(stats)}
+    except ImportError:
+        return {"ok": False, "error": "xray_manager not available"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/xray/traffic/sync")
+async def xray_traffic_sync(_=Depends(require_auth)):
+    """Sync real Xray-core traffic into panel user records."""
+    try:
+        from xray_manager import sync_traffic_to_panel
+        await sync_traffic_to_panel()
+        return {"ok": True, "message": "Traffic synced from Xray-core"}
+    except ImportError:
+        return {"ok": False, "error": "xray_manager not available"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 

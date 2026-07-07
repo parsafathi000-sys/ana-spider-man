@@ -363,12 +363,14 @@ _watcher_task = None
 
 
 async def _xray_watcher_loop():
-    """Background task: monitor Xray, restart on crash, watch for config changes."""
+    """Background task: monitor Xray, restart on crash, watch for config changes, sync traffic."""
     last_config_hash = ""
+    tick = 0
 
     while True:
         try:
             await asyncio.sleep(15)
+            tick += 1
 
             # Check if we need to be running (any Reality inbounds?)
             from main import INBOUNDS
@@ -406,6 +408,13 @@ async def _xray_watcher_loop():
                 logger.warning(f"Xray-core died unexpectedly (exit code {_xray_process.poll()}) — restarting")
                 await start_xray()
 
+            # Sync real traffic stats every 4 ticks (~60s)
+            if tick % 4 == 0 and await is_running():
+                try:
+                    await sync_traffic_to_panel()
+                except Exception as exc:
+                    logger.debug(f"Traffic sync skipped: {exc}")
+
         except Exception as exc:
             logger.error(f"Xray watcher error: {exc}")
 
@@ -441,3 +450,90 @@ async def get_status() -> dict:
         "config_path": str(XRAY_CONFIG_PATH),
         "log_path": str(XRAY_LOG_PATH),
     }
+
+
+# ── Real traffic stats via Xray API ────────────────────────────────────
+async def query_traffic_stats() -> dict[str, dict]:
+    """Query Xray-core stats API for per-user upload/download traffic.
+
+    Returns dict keyed by user config_uuid (email) with:
+        uplink: total bytes uploaded by user
+        downlink: total bytes downloaded by user
+
+    Requires Xray to be running with stats service enabled and API
+    inbound on 127.0.0.1:10085.
+    """
+    if not await is_running():
+        return {}
+
+    try:
+        # xray api statsquery --server=127.0.0.1:10085
+        proc = await asyncio.create_subprocess_exec(
+            str(XRAY_BIN), "api", "statsquery",
+            "--server=127.0.0.1:10085",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        if proc.returncode != 0:
+            logger.warning(f"Xray stats query failed: {stderr.decode()}")
+            return {}
+
+        raw = stdout.decode("utf-8", errors="ignore")
+        stats = json.loads(raw) if raw.strip() else {}
+
+        # Parse: stat[].name = "user>>>UUID>>>traffic>>>uplink" / "...downlink"
+        result: dict[str, dict] = {}
+        for item in stats.get("stat", []):
+            name = item.get("name", "")
+            value = int(item.get("value", "0"))
+            parts = name.split(">>>")
+            if len(parts) >= 5 and parts[0] == "user":
+                email = parts[1]
+                direction = parts[3]  # "uplink" or "downlink"
+                if email not in result:
+                    result[email] = {"uplink": 0, "downlink": 0}
+                if direction == "uplink":
+                    result[email]["uplink"] = value
+                elif direction == "downlink":
+                    result[email]["downlink"] = value
+
+        return result
+
+    except asyncio.TimeoutError:
+        logger.warning("Xray stats query timed out")
+        return {}
+    except json.JSONDecodeError:
+        logger.warning(f"Xray stats: invalid JSON")
+        return {}
+    except Exception as exc:
+        logger.error(f"Xray stats query error: {exc}")
+        return {}
+
+
+async def sync_traffic_to_panel():
+    """Query Xray traffic stats and sync them to panel user records."""
+    stats = await query_traffic_stats()
+    if not stats:
+        return
+
+    from main import USERS, USERS_LOCK, LINKS, LINKS_LOCK, save_state
+
+    async with USERS_LOCK:
+        for uid, u in USERS.items():
+            cuuid = u.get("config_uuid") or uid
+            if cuuid in stats:
+                s = stats[cuuid]
+                total = s["uplink"] + s["downlink"]
+                if total > u.get("traffic_used_bytes", 0):
+                    u["traffic_used_bytes"] = total
+
+    async with LINKS_LOCK:
+        for lid, link in LINKS.items():
+            if lid in stats:
+                s = stats[lid]
+                total = s["uplink"] + s["downlink"]
+                if total > link.get("used_bytes", 0):
+                    link["used_bytes"] = total
+
+    asyncio.create_task(save_state())
