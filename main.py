@@ -357,6 +357,28 @@ def generate_uuid() -> str:
     return secrets.token_hex(16)
 
 
+def generate_x25519_keys() -> tuple[str, str]:
+    """Generate an x25519 key pair for Reality protocol.
+
+    Returns (private_key_b64, public_key_b64) compatible with
+    xray-core / 3x-ui realitySettings.settings.publicKey.
+    """
+    import base64 as _b64
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
+    priv = X25519PrivateKey.generate()
+    priv_bytes = priv.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    pub_bytes = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    return _b64.b64encode(priv_bytes).decode(), _b64.b64encode(pub_bytes).decode()
+
+
 def generate_random_path(prefix: str = "", length: int = 6) -> str:
     """Generate a URL-safe random path segment once per user.
 
@@ -389,9 +411,12 @@ def generate_vless_link(uuid: str, host: str, remark: str = "Spider", protocol: 
         # xhttp-packet-up / xhttp-stream-up / xhttp-stream-one
         mode = protocol.replace("xhttp-", "")  # packet-up | stream-up | stream-one
         path = f"/xhttp-siz10/{mode}/{uuid}"
-        xpad = "100-1000"
-        xsc = "1000000"
-        extra_raw = '{{"xPaddingBytes":"{}","mode":"{}","scMaxEachPostBytes":"{}"}}'.format(xpad, mode, xsc)
+        extra_obj = {
+            "xPaddingBytes": "100-1000",
+            "mode": mode,
+            "scMaxEachPostBytes": "1000000",
+        }
+        extra_raw = json.dumps(extra_obj, separators=(',', ':'))
         extra = quote(extra_raw, safe='')
         params = {
             "encryption": "none",
@@ -547,40 +572,94 @@ def generate_user_config(user_id: str, user: dict, inbound_id: str = None) -> st
         USERS[user_id] = user
         asyncio.create_task(save_state())
 
-    # ── Reality Protocol ──
+    # ── Reality Protocol (3x-ui compatible) ──
     if protocol == "reality":
-        rs = inbound.get("reality_settings", {}) if inbound else SETTINGS.get("reality", {})
-        xs = inbound.get("xhttp_settings", {}) if inbound else SETTINGS.get("xhttp", {})
-        # Fallback to global if inbound settings are empty
+        rs = inbound.get("reality_settings", {}) if inbound else {}
         if not rs:
             rs = SETTINGS.get("reality", {})
+        # XHTTP settings — used only when transport is xhttp
+        xs = inbound.get("xhttp_settings", {}) if inbound else {}
         if not xs:
             xs = SETTINGS.get("xhttp", {})
+
+        # Extract Reality fields (matching 3x-ui streamSettings.realitySettings)
         reality_pbk = rs.get("public_key", "")
-        reality_sid = rs.get("short_id", "5a3ff5a13d")
+        reality_sid = rs.get("short_id", "")
         reality_spx = rs.get("spiderx", "/")
         reality_fp = (inbound.get("fingerprint") if inbound else None) or rs.get("fingerprint", "chrome")
-        sni_reality = sni if sni and sni != host else rs.get("sni", "is1-ssl.mzstatic.com")
-        ext_domain = (inbound.get("external_domain") if inbound else None) or (inbound.get("domain") if inbound else None) or rs.get("external_domain") or host
-        ext_port = (inbound.get("external_port") if inbound else None) or rs.get("external_port", 443) or 443
-        if not reality_pbk or not reality_sid:
-            return f"vless://{config_uuid}@{ext_domain}:{ext_port}?encryption=none&security=reality&sni={quote(sni_reality)}&fp={reality_fp}&pbk=MISSING_PBK&sid=MISSING_SID&type=tcp#{remark}"
-        rpath = stored_path if stored_path else xs.get("path", "/")
-        rt = user.get("transport_type") or (inbound.get("network") if inbound else None) or "xhttp"
-        if rt == "xhttp":
-            xpb = xs.get("xPaddingBytes", "100-1000")
-            xmod = xs.get("mode", "auto")
-            xsc = xs.get("scMaxEachPostBytes", "1000000")
-            extra_raw = '{{"xPaddingBytes":"{}","mode":"{}","scMaxEachPostBytes":"{}"}}'.format(xpb, xmod, xsc)
-            extra = quote(extra_raw, safe='')
-            params = (f"encryption=none&security=reality"
-                      f"&sni={quote(sni_reality)}&fp={reality_fp}"
-                      f"&pbk={reality_pbk}&sid={reality_sid}&spx={quote(reality_spx, safe='')}"
-                      f"&type=xhttp&path={rpath}&mode={xmod}&extra={extra}")
+
+        # SNI — use user's sni if set, otherwise inbound's sni, then reality's serverNames, then default
+        if sni and sni != host:
+            sni_reality = sni
         else:
-            params = (f"encryption=none&security=reality&type=tcp"
-                      f"&sni={quote(sni_reality)}&fp={reality_fp}&alpn=h2,http/1.1"
-                      f"&pbk={reality_pbk}&sid={reality_sid}&spx={quote(reality_spx, safe='')}")
+            sni_reality = (inbound.get("sni") if inbound else None) or rs.get("sni") or "is1-ssl.mzstatic.com"
+
+        # Address — external_domain + external_port from inbound (matching 3x-ui)
+        ext_domain = (inbound.get("external_domain") if inbound else None) or (inbound.get("domain") if inbound else None) or host
+        ext_port = (inbound.get("external_port") if inbound else None) or (inbound.get("port") if inbound else None) or 443
+
+        # Transport — inherited from inbound network (defaults to xhttp for Reality)
+        rt = (inbound.get("network") if inbound else None) or "xhttp"
+
+        # Missing keys guard
+        if not reality_pbk or not reality_sid:
+            return (f"vless://{config_uuid}@{ext_domain}:{ext_port}"
+                    f"?encryption=none&security=reality"
+                    f"&sni={quote(sni_reality)}&fp={reality_fp}"
+                    f"&pbk=MISSING_PBK&sid=MISSING_SID"
+                    f"&spx={quote(reality_spx, safe='')}"
+                    f"&type={quote(rt)}"
+                    f"#{remark}")
+
+        # Build params matching 3x-ui applyShareRealityParams + applyXhttpExtraParams
+        params_parts = [
+            "encryption=none",
+            "security=reality",
+            f"sni={quote(sni_reality)}",
+            f"fp={reality_fp}",
+            f"pbk={reality_pbk}",
+            f"sid={reality_sid}",
+            f"spx={quote(reality_spx, safe='')}",
+        ]
+
+        if rt == "xhttp":
+            # XHTTP path from inbound settings (NOT the generic stored_path)
+            xhttp_path = xs.get("path") or "/"
+            xhttp_mode = xs.get("mode") or "auto"
+            xpb = xs.get("xPaddingBytes") or "100-1000"
+            xsc = xs.get("scMaxEachPostBytes") or "1000000"
+
+            # Build extra JSON (3x-ui buildXhttpExtra style)
+            extra_obj = {"mode": xhttp_mode}
+            if xpb and xpb != "0-0":
+                extra_obj["xPaddingBytes"] = xpb
+            if xsc and xsc != "1000000":
+                extra_obj["scMaxEachPostBytes"] = xsc
+            # Always include defaults so clients get the correct padding
+            if "xPaddingBytes" not in extra_obj:
+                extra_obj["xPaddingBytes"] = "100-1000"
+            if "scMaxEachPostBytes" not in extra_obj:
+                extra_obj["scMaxEachPostBytes"] = "1000000"
+
+            extra_raw = json.dumps(extra_obj, separators=(',', ':'))
+            extra = quote(extra_raw, safe='')
+
+            params_parts.extend([
+                "type=xhttp",
+                f"path={quote(xhttp_path, safe='')}",
+                f"mode={xhttp_mode}",
+                f"extra={extra}",
+            ])
+        else:
+            params_parts.extend([
+                f"type={quote(rt)}",
+                "alpn=h2,http/1.1",
+            ])
+            # If using a custom path for non-xhttp Reality
+            if stored_path and stored_path != "/":
+                params_parts.append(f"path={quote(stored_path, safe='')}")
+
+        params = "&".join(params_parts)
         return f"vless://{config_uuid}@{ext_domain}:{ext_port}?{params}#{remark}"
 
     # ── VLESS ──
@@ -594,17 +673,33 @@ def generate_user_config(user_id: str, user: dict, inbound_id: str = None) -> st
             params = f"encryption=none&security=tls&type=tcp&host={quote(vless_host)}&sni={quote(sni)}&fp=chrome&alpn=h2,http/1.1"
             return f"vless://{config_uuid}@{vless_host}:{vless_port}?{params}#{remark}"
         elif transport_type == "xhttp":
-            # Read xhttp settings from user's link in LINKS (sync access ok — single-thread)
+            # Read xhttp settings from user's link in LINKS + inbound override
             xh = {}
             lk = LINKS.get(config_uuid)
             if lk:
                 xh = lk.get("xhttp_settings", {})
-            xpad = xh.get("xPaddingBytes", "100-1000")
-            xmode = xh.get("mode", "auto")
-            xsc = xh.get("scMaxEachPostBytes", "1000000")
-            extra_raw = '{{"xPaddingBytes":"{}","mode":"{}","scMaxEachPostBytes":"{}"}}'.format(xpad, xmode, xsc)
+            # Inbound xhttp settings override link defaults
+            if inbound and inbound.get("xhttp_settings"):
+                xh.update(inbound["xhttp_settings"])
+
+            xhttp_path = xh.get("path") or stored_path or "/"
+            xhttp_mode = xh.get("mode") or "auto"
+            xpb = xh.get("xPaddingBytes") or "100-1000"
+            xsc = xh.get("scMaxEachPostBytes") or "1000000"
+
+            extra_obj = {"mode": xhttp_mode}
+            if xpb and xpb != "0-0":
+                extra_obj["xPaddingBytes"] = xpb
+            if xsc and xsc != "1000000":
+                extra_obj["scMaxEachPostBytes"] = xsc
+            if "xPaddingBytes" not in extra_obj:
+                extra_obj["xPaddingBytes"] = "100-1000"
+            if "scMaxEachPostBytes" not in extra_obj:
+                extra_obj["scMaxEachPostBytes"] = "1000000"
+
+            extra_raw = json.dumps(extra_obj, separators=(',', ':'))
             extra = quote(extra_raw, safe='')
-            params = f"encryption=none&security=tls&type=xhttp&host={quote(vless_host)}&path={quote(stored_path, safe='')}&sni={quote(sni)}&fp=chrome&alpn=h2,http/1.1&mode={xmode}&extra={extra}"
+            params = f"encryption=none&security=tls&type=xhttp&host={quote(vless_host)}&path={quote(xhttp_path, safe='')}&sni={quote(sni)}&fp=chrome&alpn=h2,http/1.1&mode={xhttp_mode}&extra={extra}"
             return f"vless://{config_uuid}@{vless_host}:{vless_port}?{params}#{remark}"
         else:  # ws — config_uuid IS the path (same as reference RVG-main)
             ws_host = (inbound.get("domain") if inbound else None) or SETTINGS.get("domain") or host
@@ -1337,21 +1432,10 @@ async def create_inbound(request: Request, _=Depends(require_auth)):
 
     # Auto-generate Reality key pair + short_id if protocol is reality
     if protocol == "reality":
-        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
-        from cryptography.hazmat.primitives import serialization
         if not reality_settings.get("private_key") or not reality_settings.get("public_key"):
-            priv = X25519PrivateKey.generate()
-            priv_bytes = priv.private_bytes(
-                encoding=serialization.Encoding.Raw,
-                format=serialization.PrivateFormat.Raw,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
-            pub_bytes = priv.public_key().public_bytes(
-                encoding=serialization.Encoding.Raw,
-                format=serialization.PublicFormat.Raw,
-            )
-            reality_settings["private_key"] = base64.b64encode(priv_bytes).decode()
-            reality_settings["public_key"] = base64.b64encode(pub_bytes).decode()
+            priv, pub = generate_x25519_keys()
+            reality_settings["private_key"] = priv
+            reality_settings["public_key"] = pub
             logger.info("Auto-generated Reality x25519 key pair for inbound")
         if not reality_settings.get("short_id"):
             reality_settings["short_id"] = secrets.token_hex(5)[:10]  # 10-char hex like 3x-ui
