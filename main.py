@@ -311,6 +311,31 @@ async def require_auth(request: Request):
     return token
 
 # ── Startup / Shutdown ────────────────────────────────────────────────────────
+
+
+async def _auto_install_xray_on_deploy():
+    """Background task: download and install Xray-core during deploy.
+
+    Runs once at startup if Xray is not already present. Does not block
+    the server from coming up — API is available while downloading.
+    After installation, the watcher (already started) will auto-start
+    Xray if there are Reality inbounds.
+    """
+    try:
+        from xray_manager import install_xray, get_local_version, start_xray, ensure_xray_running
+        logger.info("[deploy] Downloading Xray-core v26.3.27 ...")
+        ok = await install_xray(force=False)
+        if ok:
+            ver = await get_local_version()
+            logger.info(f"[deploy] Xray-core {ver} installed successfully")
+            # If there are already Reality inbounds, start Xray immediately
+            await ensure_xray_running()
+        else:
+            logger.error("[deploy] Xray-core installation failed — use panel UI to retry")
+    except Exception as exc:
+        logger.error(f"[deploy] Xray auto-install error: {exc}")
+
+
 @app.on_event("startup")
 async def startup():
     global http_client
@@ -320,6 +345,20 @@ async def startup():
         limits=limits, timeout=timeout, follow_redirects=True,
     )
     await load_state()
+
+    # ── Xray-core integration ──
+    try:
+        from xray_manager import install_xray, start_xray, start_watcher, is_installed
+        if await is_installed():
+            logger.info("Xray-core found — starting watcher")
+        else:
+            logger.info("Xray-core not found — auto-installing in background during deploy")
+            # Fire-and-forget: download + extract in background, don't block startup
+            asyncio.create_task(_auto_install_xray_on_deploy())
+        start_watcher()
+    except ImportError as e:
+        logger.warning(f"xray_manager not available: {e}")
+
     # Auto-create default inbound if none exist
     async with INBOUNDS_LOCK:
         if not INBOUNDS:
@@ -344,6 +383,13 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
+    # Stop Xray-core
+    try:
+        from xray_manager import stop_xray, stop_watcher
+        await stop_watcher()
+        await stop_xray()
+    except ImportError:
+        pass
     await save_state()
     if http_client:
         await http_client.aclose()
@@ -638,7 +684,14 @@ def generate_user_config(user_id: str, user: dict, inbound_id: str = None) -> st
         if sni and sni != host:
             sni_reality = sni
         else:
-            sni_reality = (inbound.get("sni") if inbound else None) or rs.get("sni") or "is1-ssl.mzstatic.com"
+            # Read from inbound sni, then reality_settings (preferring server_names array, then sni key)
+            rs_sn = rs.get("server_names")
+            sni_from_rs = None
+            if isinstance(rs_sn, list) and len(rs_sn) > 0:
+                sni_from_rs = rs_sn[0]
+            elif isinstance(rs_sn, str) and rs_sn:
+                sni_from_rs = rs_sn
+            sni_reality = (inbound.get("sni") if inbound else None) or sni_from_rs or rs.get("sni") or "is1-ssl.mzstatic.com"
 
         # Address — external_domain + external_port from inbound (matching 3x-ui)
         ext_domain = (inbound.get("external_domain") if inbound else None) or (inbound.get("domain") if inbound else None) or host
@@ -1489,6 +1542,14 @@ async def create_inbound(request: Request, _=Depends(require_auth)):
     # Normalize: accept short_ids (frontend sends this) → map to short_id
     if "short_ids" in reality_settings and "short_id" not in reality_settings:
         reality_settings["short_id"] = reality_settings.pop("short_ids")
+    # Normalize: accept server_names (frontend sends array) → store as sni + server_names
+    if "server_names" in reality_settings:
+        sn_list = reality_settings["server_names"]
+        if isinstance(sn_list, list) and len(sn_list) > 0:
+            reality_settings["sni"] = str(sn_list[0])
+        elif isinstance(sn_list, str):
+            reality_settings["sni"] = sn_list
+        reality_settings.setdefault("server_names", sn_list)
     xhttp_settings = body.get("xhttp_settings", {}) if isinstance(body.get("xhttp_settings"), dict) else {}
     ws_settings = body.get("ws_settings", {}) if isinstance(body.get("ws_settings"), dict) else {}
     grpc_settings = body.get("grpc_settings", {}) if isinstance(body.get("grpc_settings"), dict) else {}
@@ -1582,6 +1643,11 @@ async def update_inbound(inbound_id: str, request: Request, _=Depends(require_au
                     incoming["short_id"] = v
                 elif v:  # skip empty strings / None
                     incoming[k] = v
+            # Normalize server_names -> sni
+            if "server_names" in incoming:
+                sn = incoming["server_names"]
+                if isinstance(sn, list) and len(sn) > 0:
+                    incoming["sni"] = str(sn[0])
             if incoming:
                 ib.setdefault("reality_settings", {}).update(incoming)
 
@@ -1954,18 +2020,6 @@ async def delete_user(user_id: str, _=Depends(require_auth)):
     asyncio.create_task(save_state())
     log_activity("user", f"کاربر «{username}» حذف شد", "err")
     return {"ok": True, "deleted": user_id}
-
-@app.get("/api/users/{user_id}")
-async def get_user(user_id: str, _=Depends(require_auth)):
-    """Get single user details."""
-    async with USERS_LOCK:
-        if user_id not in USERS:
-            raise HTTPException(status_code=404, detail="user not found")
-        u = dict(USERS[user_id])
-        u["user_id"] = user_id
-        u["password_hash"] = None
-        return u
-
 
 @app.get("/api/users/{user_id}")
 async def get_single_user(user_id: str, _=Depends(require_auth)):
@@ -3262,6 +3316,13 @@ def _add_inbound_to_xray(cfg: dict, ib: dict, iid: str, host: str):
     
     # Transport / Stream settings
     if protocol == "reality":
+        # Determine serverNames: prefer array from server_names, fall back to sni string
+        sn = rs.get("server_names")
+        if not sn or (isinstance(sn, list) and len(sn) == 0):
+            default_sni = rs.get("sni", "is1-ssl.mzstatic.com")
+            sn = [default_sni]
+        elif isinstance(sn, str):
+            sn = [sn]
         inbound_obj["streamSettings"] = {
             "network": network if network in ("tcp", "xhttp", "grpc") else "tcp",
             "security": "reality",
@@ -3269,9 +3330,10 @@ def _add_inbound_to_xray(cfg: dict, ib: dict, iid: str, host: str):
                 "show": False,
                 "dest": rs.get("dest", "is1-ssl.mzstatic.com:443"),
                 "xver": 0,
-                "serverNames": [rs.get("sni", "is1-ssl.mzstatic.com")],
+                "serverNames": sn,
                 "privateKey": rs.get("private_key", ""),
                 "shortIds": [rs.get("short_id", "5a3ff5a13d")],
+                "fingerprint": "chrome",
                 "spiderX": rs.get("spiderx", "/"),
             }
         }
@@ -3660,6 +3722,104 @@ async def scan_railway_ips(_=Depends(require_auth)):
 
 
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# XRAY-CORE MANAGEMENT API
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/xray/status")
+async def xray_status(_=Depends(require_auth)):
+    """Get Xray-core installation and runtime status."""
+    try:
+        from xray_manager import get_status
+        return {"ok": True, **await get_status()}
+    except ImportError:
+        return {"ok": False, "error": "xray_manager not available"}
+
+
+@app.post("/api/xray/install")
+async def xray_install(_=Depends(require_auth)):
+    """Download and install Xray-core."""
+    try:
+        from xray_manager import install_xray, get_local_version
+        ok = await install_xray(force=False)
+        ver = await get_local_version()
+        return {"ok": ok, "version": ver, "message": "Xray-core installed" if ok else "Installation failed"}
+    except ImportError:
+        return {"ok": False, "error": "xray_manager not available"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/xray/start")
+async def xray_start(_=Depends(require_auth)):
+    """Start Xray-core service."""
+    try:
+        from xray_manager import start_xray, get_status
+        ok = await start_xray()
+        status = await get_status()
+        return {"ok": ok, **status, "message": "Xray-core started" if ok else "Failed to start"}
+    except ImportError:
+        return {"ok": False, "error": "xray_manager not available"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/xray/stop")
+async def xray_stop(_=Depends(require_auth)):
+    """Stop Xray-core service."""
+    try:
+        from xray_manager import stop_xray
+        ok = await stop_xray()
+        return {"ok": ok, "message": "Xray-core stopped" if ok else "Was not running"}
+    except ImportError:
+        return {"ok": False, "error": "xray_manager not available"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/xray/restart")
+async def xray_restart(_=Depends(require_auth)):
+    """Restart Xray-core service."""
+    try:
+        from xray_manager import restart_xray, get_status
+        ok = await restart_xray()
+        status = await get_status()
+        return {"ok": ok, **status, "message": "Xray-core restarted" if ok else "Restart failed"}
+    except ImportError:
+        return {"ok": False, "error": "xray_manager not available"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/xray/logs")
+async def xray_logs(limit: int = 100, _=Depends(require_auth)):
+    """Get recent Xray-core logs."""
+    try:
+        from xray_manager import XRAY_LOG_PATH
+        if not XRAY_LOG_PATH.exists():
+            return {"ok": True, "lines": [], "message": "No logs yet"}
+        with open(XRAY_LOG_PATH, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+        tail = lines[-limit:] if len(lines) > limit else lines
+        return {"ok": True, "lines": [l.rstrip() for l in tail], "total_lines": len(lines)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/xray/config")
+async def xray_server_config(_=Depends(require_auth)):
+    """Get the current Xray-core server config.json (the one on disk)."""
+    try:
+        from xray_manager import XRAY_CONFIG_PATH
+        if not XRAY_CONFIG_PATH.exists():
+            return {"ok": False, "error": "Config not generated yet"}
+        with open(XRAY_CONFIG_PATH, "r", encoding="utf-8") as f:
+            config = json.loads(f.read())
+        return {"ok": True, "config": config, "config_json": json.dumps(config, indent=2, ensure_ascii=False)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 
 # Lazy XHTTP import (after all symbols defined)
 try:

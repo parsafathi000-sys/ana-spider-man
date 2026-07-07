@@ -567,6 +567,23 @@ tr{animation:fadeIn .3s ease}
             <button class="btn btn-p" style="width:100%">تغییر رمز</button>
           </form>
         </div>
+
+        <!-- Xray-core Management -->
+        <div class="panel">
+          <div class="panel-h">
+            <span class="glow">Xray-core</span>
+            <span id="xray-status-dot" style="width:10px;height:10px;border-radius:50%;background:var(--txt2);display:inline-block;margin-right:8px"></span>
+            <span id="xray-status-text" style="font-size:11px;color:var(--txt2)">...</span>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <button class="btn btn-sm btn-p" onclick="xrayAction('install')">نصب Xray</button>
+            <button class="btn btn-sm btn-gr" onclick="xrayAction('start')">Start</button>
+            <button class="btn btn-sm btn-r" onclick="xrayAction('stop')">Stop</button>
+            <button class="btn btn-sm btn-b" onclick="xrayAction('restart')">Restart</button>
+          </div>
+          <div id="xray-info" style="font-size:11px;color:var(--txt2)"></div>
+          <div id="xray-log" style="font-family:monospace;font-size:10px;color:var(--txt2);max-height:150px;overflow-y:auto;background:var(--bg3);border-radius:8px;padding:8px;margin-top:8px;display:none;direction:ltr;text-align:left"></div>
+        </div>
       </div>
 
     </div><!-- /content -->
@@ -1666,6 +1683,63 @@ function togglePanelAudio(){var p=$id('panel-audio-player');if($id('audio-autopl
 
 // Start neon bars when tab opens
 setTimeout(updateNeonBars, 500);
+
+// ─── Xray-core Management ───
+async function xrayAction(action) {
+  var btn = event.target;
+  var origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    var r = await api('/api/xray/' + action, {method: 'POST'});
+    if (r.ok) {
+      toast((r.message || 'OK'), 'ok');
+      updateXrayStatus();
+      if (action === 'start' || action === 'restart') {
+        setTimeout(function() { loadXrayLogs(); }, 2000);
+      }
+    } else {
+      toast(r.error || 'خطا', 'err');
+    }
+  } catch(e) {
+    toast(e.message, 'err');
+  }
+  btn.disabled = false;
+  btn.textContent = origText;
+}
+
+async function updateXrayStatus() {
+  try {
+    var r = await api('/api/xray/status');
+    var dot = $id('xray-status-dot');
+    var txt = $id('xray-status-text');
+    var info = $id('xray-info');
+    if (r.ok) {
+      dot.style.background = r.running ? 'var(--green)' : 'var(--red)';
+      txt.textContent = r.running ? 'Running (PID: ' + r.pid + ')' : (r.installed ? 'نصب شده — Stop' : 'نصب نشده');
+      info.textContent = 'نسخه: ' + (r.version || '?') + ' | نصب: ' + (r.installed ? '✅' : '❌');
+    } else {
+      dot.style.background = 'var(--txt2)';
+      txt.textContent = 'در دسترس نیست';
+      info.textContent = '';
+    }
+  } catch(e) {}
+}
+
+async function loadXrayLogs() {
+  try {
+    var r = await api('/api/xray/logs?limit=50');
+    var el = $id('xray-log');
+    if (r.ok && r.lines && r.lines.length > 0) {
+      el.textContent = r.lines.join('\n');
+      el.style.display = 'block';
+    }
+  } catch(e) {}
+}
+
+// Auto-update Xray status every 30s
+setInterval(updateXrayStatus, 30000);
+setTimeout(updateXrayStatus, 2000);
 
 </script>
 </body>
