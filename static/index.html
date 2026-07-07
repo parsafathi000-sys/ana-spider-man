@@ -1053,8 +1053,6 @@ async function submitCreateUser(e) {
       password: $id('cu-password').value || '',
       protocol: $id('cu-proto').value || 'vless',
       transport_type: $id('cu-transport').value || 'ws',
-      protocol: $id('eu-proto').value || 'vless',
-      transport_type: $id('eu-transport').value || 'ws',
       traffic_limit_gb: vu === 'GB' ? v : v / 1024,
       expire_days: eu === 'months' ? ex * 30 : ex,
       concurrent_connections: parseInt($id('cu-conn').value) || 2,
@@ -1165,8 +1163,6 @@ function populateInboundSelects() {
     return '<option value="' + ib.inbound_id + '" data-proto="' + (ib.protocol||'') + '">' + esc(ib.name) + ' (' + (ib.protocol||'vless').toUpperCase() + ')</option>';
   }).join('');
   var sel = $id('cu-inbound');
-  $id('eu-proto').value = u.protocol || 'vless';
-  $id('eu-transport').value = u.transport_type || 'ws';
   if (sel) sel.innerHTML = opts;
 }
 
@@ -1265,7 +1261,6 @@ function openCreateInbound() {
   $id('ib-domain').value = '';
   $id('ib-sni').value = '';
   $id('ib-extdomain').value = '';
-  $id('ib-extport').value = '';
   $id('ib-privkey').value = '';
   $id('ib-pubkey').value = '';
   $id('ib-shortids').value = '';
