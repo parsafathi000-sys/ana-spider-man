@@ -1,7 +1,9 @@
 # Spider Gateway - Dockerfile for Railway Deployment
-# Multi-stage build for minimal image size
+# Proper multi-stage build: Builder installs Xray, Runtime only copies binary
 
-# Build stage
+# ============================================================
+# BUILDER STAGE: Install Xray Core and Python dependencies
+# ============================================================
 FROM python:3.11-slim AS builder
 
 # Install build dependencies
@@ -17,13 +19,24 @@ WORKDIR /app
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install Python dependencies to user site-packages
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Production stage
+# Download, verify and install Xray Core
+RUN mkdir -p /tmp/xray-build \
+    && wget -q -O /tmp/xray-build/Xray-linux-64.zip \
+       "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip" \
+    && unzip -q /tmp/xray-build/Xray-linux-64.zip -d /tmp/xray-build/extracted \
+    && chmod +x /tmp/xray-build/extracted/xray \
+    && /tmp/xray-build/extracted/xray version \
+    && rm -rf /tmp/xray-build/Xray-linux-64.zip
+
+# ============================================================
+# RUNTIME STAGE: Minimal image with only what's needed
+# ============================================================
 FROM python:3.11-slim
 
-# Install runtime dependencies
+# Install ONLY runtime dependencies (no wget, no unzip)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -37,8 +50,17 @@ WORKDIR /app
 # Copy Python packages from builder
 COPY --from=builder /root/.local /home/appuser/.local
 
-# Create Xray Core directory with proper permissions
-RUN mkdir -p /app/xray-core && chown -R appuser:appuser /app/xray-core
+# Copy Xray binary from builder (includes geoip.dat/geosite.dat if present in zip)
+COPY --from=builder /tmp/xray-build/extracted/xray /app/xray-core/xray
+
+# Copy geo assets if they exist in the extracted directory (ignore if missing)
+COPY --from=builder /tmp/xray-build/extracted/geoip.dat* /app/xray-assets/
+COPY --from=builder /tmp/xray-build/extracted/geosite.dat* /app/xray-assets/
+
+# Set permissions on Xray binary and assets
+RUN chmod +x /app/xray-core/xray \
+    && chown -R appuser:appuser /app/xray-core /app/xray-assets \
+    && /app/xray-core/xray version
 
 # Copy application code
 COPY --chown=appuser:appuser . .
@@ -49,28 +71,16 @@ USER appuser
 # Add user site-packages to PATH
 ENV PATH="/home/appuser/.local/bin:${PATH}"
 
-# Xray Core installation script (runs at build time)
-# This ensures Xray is available in the image
-RUN mkdir -p /app/xray-core \
-    && wget -q -O /tmp/Xray-linux-64.zip "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip" \
-    && unzip -q -q /tmp/Xray-linux-64.zip -d /tmp/xray-extracted \
-    && mv /tmp/xray-extracted/xray /app/xray-core/xray \
-    && chmod +x /app/xray-core/xray \
-    && chown appuser:appuser /app/xray-core/xray \
-    && /app/xray-core/xray version \
-    && rm -rf /tmp/Xray-linux-64.zip /tmp/xray-extracted
-
-# Environment variables
+# Environment variables (NO Railway runtime vars at build time)
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     XRAY_BINARY_PATH=/app/xray-core/xray \
     XRAY_CONFIG_PATH=/app/xray-config/config.json \
     XRAY_ASSETS_DIR=/app/xray-assets \
-    XRAY_LOG_DIR=/app/xray-logs \
-    RAILWAY_PUBLIC_DOMAIN=${RAILWAY_PUBLIC_DOMAIN:-localhost}
+    XRAY_LOG_DIR=/app/xray-logs
 
-# Create directories for Xray config and assets
-RUN mkdir -p /app/xray-config /app/xray-assets /app/xray-logs && chown -R appuser:appuser /app/xray-config /app/xray-assets /app/xray-logs
+# Create directories for Xray config, assets, logs
+RUN mkdir -p /app/xray-config /app/xray-logs && chown -R appuser:appuser /app/xray-config /app/xray-logs
 
 # Expose port
 EXPOSE 8000

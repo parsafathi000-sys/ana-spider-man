@@ -49,10 +49,11 @@ XRAY_VERSION = os.environ.get("XRAY_VERSION", "26.3.27")  # Latest stable as of 
 
 XRAY_BASE_URL = "https://github.com/XTLS/Xray-core/releases/download"
 XRAY_AUTO_UPDATE = os.environ.get("XRAY_AUTO_UPDATE", "true").lower() == "true"
-XRAY_PATH = Path(os.environ.get("XRAY_PATH", os.path.expanduser("~/.local/bin/xray")))
-XRAY_CONFIG_PATH = Path(os.environ.get("XRAY_CONFIG_PATH", os.path.expanduser("~/.config/xray/config.json")))
-XRAY_LOG_DIR = Path(os.environ.get("XRAY_LOG_DIR", os.path.expanduser("~/.local/share/xray/logs")))
-XRAY_ASSETS_DIR = Path(os.environ.get("XRAY_ASSETS_DIR", os.path.expanduser("~/.local/share/xray")))
+# In Docker/Railway, binary is at /app/xray-core/xray; locally use ~/.local/bin/xray
+XRAY_PATH = Path(os.environ.get("XRAY_PATH", "/app/xray-core/xray" if os.path.exists("/app/xray-core/xray") else os.path.expanduser("~/.local/bin/xray")))
+XRAY_CONFIG_PATH = Path(os.environ.get("XRAY_CONFIG_PATH", "/app/xray-config/config.json" if os.path.exists("/app/xray-config") else os.path.expanduser("~/.config/xray/config.json")))
+XRAY_LOG_DIR = Path(os.environ.get("XRAY_LOG_DIR", "/app/xray-logs" if os.path.exists("/app/xray-logs") else os.path.expanduser("~/.local/share/xray/logs")))
+XRAY_ASSETS_DIR = Path(os.environ.get("XRAY_ASSETS_DIR", "/app/xray-assets" if os.path.exists("/app/xray-assets") else os.path.expanduser("~/.local/share/xray")))
 
 # Architecture mapping for Xray releases
 ARCH_MAP = {
