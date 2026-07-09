@@ -58,7 +58,7 @@ COPY --from=builder /tmp/xray-build/extracted/geoip.dat* /app/xray-assets/
 COPY --from=builder /tmp/xray-build/extracted/geosite.dat* /app/xray-assets/
 
 # Create ALL required directories BEFORE switching user
-RUN mkdir -p /app/xray-core /app/xray-assets /app/xray-config /app/xray-logs
+RUN mkdir -p /app/xray-core /app/xray-assets /app/xray-config /app/xray-logs /data
 
 # Set permissions on Xray binary and ALL directories (as root)
 RUN chmod +x /app/xray-core/xray \
@@ -67,6 +67,7 @@ RUN chmod +x /app/xray-core/xray \
        /app/xray-assets \
        /app/xray-config \
        /app/xray-logs \
+       /data \
     && /app/xray-core/xray version
 
 # Copy application code with correct ownership

@@ -462,7 +462,7 @@ def generate_vless_link(uuid: str, remark: str = "Spider", inbound_id: str | Non
     # Reality protocol – ensure required fields exist
     if security == "reality":
         rs = inbound.get("reality_settings", {})
-        # Required fields validation – if missing, raise clear error
+        # Required fields validation – if missing, return error info
         missing = []
         # Use private_key/public_key from inbound config (persisted)
         if not rs.get("private_key") and not rs.get("public_key"):
@@ -472,11 +472,20 @@ def generate_vless_link(uuid: str, remark: str = "Spider", inbound_id: str | Non
         if not rs.get("sni") and not rs.get("serverNames"):
             missing.append("sni")
         if missing:
-            raise ValueError(f"Reality configuration incomplete: missing {', '.join(missing)}")
+            # Return error info instead of raising ValueError
+            return {
+                "error": True,
+                "error_type": "reality_incomplete",
+                "message": "Reality configuration incomplete",
+                "missing": missing
+            }
         # Use the persisted keys for the link
         params["pbk"] = rs.get("public_key", "")  # PublicKey goes to pbk
         params["sid"] = rs.get("short_id", "")
         params["spx"] = quote(rs.get("spiderx", "/"))
+        # Use serverNames for sni if available
+        if not params.get("sni") and rs.get("serverNames"):
+            params["sni"] = rs["serverNames"][0]
 
     # Build query string, skipping empty values
     query = "&".join(f"{k}={quote(str(v))}" for k, v in params.items() if v)
@@ -810,7 +819,14 @@ async def subscription_handler(identifier: str, request: Request):
     if link and is_link_allowed(link):
         host = SETTINGS.get("domain") or get_host()
         proto = link.get("protocol", DEFAULT_PROTOCOL)
-        vless = generate_vless_link(identifier, remark=f"Spider-{link['label']}")
+        try:
+            vless = generate_vless_link(identifier, remark=f"Spider-{link['label']}")
+        except ValueError as e:
+            return Response(
+                content=json.dumps({"success": False, "error": "Reality inbound is incomplete", "missing": str(e).split(": ")[-1].split(", ")}),
+                media_type="application/json",
+                status_code=400
+            )
         content = base64.b64encode(vless.encode()).decode()
         return Response(content=content, media_type="text/plain",
                         headers={"profile-title": quote(link["label"]), "support-url": "https://t.me/SpiderPanel"})
@@ -822,11 +838,14 @@ async def subscription_all(_=Depends(require_auth)):
     import base64
     host = SETTINGS.get("domain") or get_host()
     async with LINKS_LOCK:
-        lines = [
-            generate_vless_link(uid, remark=f"Spider-{d['label']}")
-            for uid, d in LINKS.items()
-            if is_link_allowed(d)
-        ]
+        lines = []
+        for uid, d in LINKS.items():
+            if is_link_allowed(d):
+                try:
+                    lines.append(generate_vless_link(uid, remark=f"Spider-{d['label']}"))
+                except ValueError:
+                    # Skip links with incomplete Reality config
+                    pass
     content = base64.b64encode("\n".join(lines).encode()).decode()
     return Response(content=content, media_type="text/plain")
 
@@ -965,7 +984,11 @@ async def sub_group_subscription(uuid_key: str, request: Request):
         for lid in link_ids:
             link = LINKS.get(lid)
             if link and is_link_allowed(link):
-                lines.append(generate_vless_link(lid, remark=f"Spider-{link['label']}"))
+                try:
+                    lines.append(generate_vless_link(lid, remark=f"Spider-{link['label']}"))
+                except ValueError:
+                    # Skip links with incomplete Reality config
+                    pass
 
     content = base64.b64encode("\n".join(lines).encode()).decode()
     return Response(
@@ -1191,11 +1214,19 @@ async def create_link(request: Request, _=Depends(require_auth)):
     asyncio.create_task(save_state())
     log_activity("link", f"کانفیگ «{label}» ساخته شد", "ok")
     host = SETTINGS.get("domain") or get_host()
+    try:
+        vless_link = generate_vless_link(uid, remark=f"Spider-{label}")
+    except ValueError as e:
+        return Response(
+            content=json.dumps({"success": False, "error": "Reality inbound is incomplete", "missing": str(e).split(": ")[-1].split(", ")}),
+            media_type="application/json",
+            status_code=400
+        )
     return {
         "uuid": uid,
         **LINKS[uid],
         "expired": False,
-        "vless_link": generate_vless_link(uid, remark=f"Spider-{label}"),
+        "vless_link": vless_link,
         "sub_url": f"https://{host}/sub/{uid}",
     }
 
@@ -1207,12 +1238,16 @@ async def list_links(_=Depends(require_auth)):
     result = []
     for uid, d in snap.items():
         proto = d.get("protocol", DEFAULT_PROTOCOL)
+        try:
+            vless_link = generate_vless_link(uid, remark=f"Spider-{d['label']}")
+        except ValueError as e:
+            vless_link = f"Error: Reality configuration incomplete - {str(e).split(': ')[-1]}"
         result.append({
             "uuid": uid,
             **d,
             "protocol": proto,
             "expired": is_link_expired(d),
-            "vless_link": generate_vless_link(uid, remark=f"Spider-{d['label']}"),
+            "vless_link": vless_link,
             "sub_url": f"https://{host}/sub/{uid}",
         })
     result.sort(key=lambda x: x["created_at"], reverse=True)
@@ -1405,6 +1440,10 @@ async def create_inbound(request: Request, _=Depends(require_auth)):
             reality_settings["short_id"] = secrets.token_hex(5)[:10]  # 10-char hex like 3x-ui
         reality_settings.setdefault("dest", "is1-ssl.mzstatic.com:443")
         reality_settings.setdefault("spiderx", "/")
+        # Auto-populate sni and serverNames for Reality if not provided
+        if not reality_settings.get("sni") and not reality_settings.get("serverNames"):
+            reality_settings["sni"] = "is1-ssl.mzstatic.com"
+            reality_settings["serverNames"] = ["is1-ssl.mzstatic.com"]
         # Set security to "reality" for Reality protocol
         security = "reality"
         # If no external_domain provided, use domain or host
@@ -1856,7 +1895,7 @@ async def delete_user(user_id: str, _=Depends(require_auth)):
     log_activity("user", f"کاربر «{username}» حذف شد", "err")
     return {"ok": True, "deleted": user_id}
 
-@app.get("/api/users/{user_id}")
+@ app.get("/api/users/{user_id}")
 async def get_single_user(user_id: str, _=Depends(require_auth)):
     """Get full details for a single user."""
     async with USERS_LOCK:
@@ -1868,9 +1907,13 @@ async def get_single_user(user_id: str, _=Depends(require_auth)):
         user["password_hash"] = None  # Never expose hash
     auto_check_user_expiry(user)
     host = SETTINGS.get("domain") or get_host()
+    try:
+        config = generate_vless_link(user.get("config_uuid"), remark=f"Spider-{user.get('username', user_id)}", inbound_id=user.get("inbound_id"), user=user)
+    except ValueError as e:
+        config = f"Error: Reality configuration incomplete - {str(e).split(': ')[-1]}"
     return {
         **user,
-        "config": generate_vless_link(user.get("config_uuid"), remark=f"Spider-{user.get('username', user_id)}", inbound_id=user.get("inbound_id"), user=user),
+        "config": config,
         "config_url": f"https://{host}/api/users/{user_id}/config",
         "qr_url": f"https://{host}/api/users/{user_id}/qr",
         "subscription_url": f"https://{host}/api/users/{user_id}/subscription",
@@ -1941,7 +1984,10 @@ async def get_user_config(user_id: str, _=Depends(require_auth)):
         u = USERS.get(user_id)
         if not u:
             raise HTTPException(status_code=404, detail="user not found")
-        config = generate_vless_link(u.get("config_uuid"), remark=f"Spider-{u.get('username', user_id)}", inbound_id=u.get("inbound_id"), user=u)
+        config_result = generate_vless_link(u.get("config_uuid"), remark=f"Spider-{u.get('username', user_id)}", inbound_id=u.get("inbound_id"), user=u)
+        if isinstance(config_result, dict) and config_result.get("error"):
+            raise HTTPException(status_code=400, detail={"success": False, "error": config_result.get("message", "Reality configuration incomplete"), "missing": config_result.get("missing", [])})
+        config = config_result
         username = u.get("username")
         protocol = u.get("protocol")
     host = SETTINGS.get("domain") or get_host()
@@ -1965,7 +2011,10 @@ async def get_user_qr(user_id: str, _=Depends(require_auth)):
         u = USERS.get(user_id)
         if not u:
             raise HTTPException(status_code=404, detail="user not found")
-        config = generate_vless_link(u.get("config_uuid"), remark=f"Spider-{u.get('username', user_id)}", inbound_id=u.get("inbound_id"), user=u)
+        try:
+            config = generate_vless_link(u.get("config_uuid"), remark=f"Spider-{u.get('username', user_id)}", inbound_id=u.get("inbound_id"), user=u)
+        except ValueError as e:
+            config = f"Error: Reality configuration incomplete - {str(e).split(': ')[-1]}"
 
     # Generate QR code
     qr = qrcode.QRCode(version=1, box_size=10, border=4, error_correction=qrcode.constants.ERROR_CORRECT_M)
@@ -1992,7 +2041,10 @@ async def get_user_subscription(user_id: str, _=Depends(require_auth)):
     if not sub_uuid:
         raise HTTPException(status_code=404, detail="no subscription configured")
 
-    config = generate_vless_link(u.get("config_uuid"), remark=f"Spider-{u.get('username', user_id)}", inbound_id=u.get("inbound_id"), user=u)
+    try:
+        config = generate_vless_link(u.get("config_uuid"), remark=f"Spider-{u.get('username', user_id)}", inbound_id=u.get("inbound_id"), user=u)
+    except ValueError as e:
+        config = f"Error: Reality configuration incomplete - {str(e).split(': ')[-1]}"
 
     return {
         "user_id": user_id,
