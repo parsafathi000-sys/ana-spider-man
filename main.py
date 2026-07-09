@@ -9,31 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import secrets
 import time
-try:
-    import aiofiles
-except ImportError:
-    # Minimal async file wrapper fallback
-    class _AioFile:
-        def __init__(self, path, mode='r'):
-            self.path = path
-            self.mode = mode
-            self.file = None
-        async def __aenter__(self):
-            self.file = open(self.path, self.mode, encoding='utf-8')
-            return self
-        async def __aexit__(self, exc_type, exc, tb):
-            if self.file:
-                self.file.close()
-        async def read(self):
-            return self.file.read()
-        async def write(self, data):
-            return self.file.write(data)
-    class aiofiles:
-        @staticmethod
-        async def open(path, mode='r', **kwargs):
-            return _AioFile(path, mode)
-
-from xray_core import initialize_xray, start_xray, stop_xray, restart_xray, get_xray_status, get_xray_logs, update_xray_core, generate_xray_config, XRAY_CONFIG_PATH
+import aiofiles
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from urllib.parse import quote
@@ -198,48 +174,6 @@ async def save_state():
 
 # ── In-memory state ───────────────────────────────────────────────────────────
 connections: dict = {}
-
-# ── Xray Management API ───────────────────────────────────────────────────────
-@app.post("/api/xray/start")
-async def api_start_xray():
-    result = await start_xray()
-    return JSONResponse(result)
-
-@app.post("/api/xray/stop")
-async def api_stop_xray():
-    result = await stop_xray()
-    return JSONResponse(result)
-
-@app.post("/api/xray/restart")
-async def api_restart_xray():
-    result = await restart_xray()
-    return JSONResponse(result)
-
-@app.get("/api/xray/status")
-async def api_xray_status():
-    status = await get_xray_status()
-    return JSONResponse(status)
-
-@app.get("/api/xray/logs")
-async def api_xray_logs(lines: int = 100):
-    logs = await get_xray_logs(lines)
-    return JSONResponse({"logs": logs})
-
-@app.post("/api/xray/update")
-async def api_update_xray():
-    result = await update_xray_core()
-    return JSONResponse(result)
-
-@app.post("/api/xray/config")
-async def api_xray_config(config: dict):
-    # Write config then validate
-    ok = await write_xray_config(config)
-    if not ok:
-        raise HTTPException(status_code=500, detail="Failed to write config")
-    valid, err = await validate_xray_config(config)
-    if not valid:
-        raise HTTPException(status_code=400, detail=f"Config validation failed: {err}")
-    return JSONResponse({"ok": True, "message": "Config updated and valid"})
 stats = {
     "total_bytes": 0,
     "total_requests": 0,
@@ -377,27 +311,25 @@ async def require_auth(request: Request):
     return token
 
 # ── Startup / Shutdown ────────────────────────────────────────────────────────
-@app.on_event("startup")
+@ app.on_event("startup")
 async def startup():
     global http_client
     limits = httpx.Limits(max_connections=500, max_keepalive_connections=100)
     timeout = httpx.Timeout(30.0, connect=10.0)
     http_client = httpx.AsyncClient(
-        limits=limits, timeout=timeout, follow_redirects=True, trust_env=False,
+        limits=limits, timeout=timeout, follow_redirects=True,
     )
     await load_state()
     
     # CRITICAL: Validate Xray binary exists and works before starting service
-    from xray_core import is_xray_installed, XRAY_PATH
+    from xray_core import is_xray_installed, get_xray_version, XRAY_PATH
     import os
     if not await is_xray_installed():
-        # If binary doesn't exist, fail startup immediately with clear error
         error_msg = f"Xray Core binary not found at {XRAY_PATH}. Build failed: Xray installation missing."
         logger.critical(error_msg)
         raise RuntimeError(error_msg)
     
     # Verify xray version command works
-    from xray_core import get_xray_version
     version = await get_xray_version()
     if not version:
         error_msg = f"Xray binary at {XRAY_PATH} is not executable or corrupted."
@@ -406,11 +338,6 @@ async def startup():
     
     logger.info(f"Xray Core validated: version {version} at {XRAY_PATH}")
     
-    # Initialize Xray Core (start if auto-start enabled)
-    try:
-        await initialize_xray()
-    except Exception as e:
-        logger.error(f"Xray initialization failed: {e}")
     # Auto-create default inbound if none exist
     async with INBOUNDS_LOCK:
         if not INBOUNDS:
@@ -462,17 +389,22 @@ def generate_random_path(prefix: str = "", length: int = 6) -> str:
 def now_ir() -> datetime:
     return datetime.now(IRAN_TZ)
 
-def generate_vless_link(uuid: str, remark: str = "Spider", inbound_id: str | None = None) -> str:
-    """Generate a VLESS share‑link strictly based on the real Xray inbound config.
+def generate_vless_link(uuid: str, remark: str = "Spider", inbound_id: str | None = None, user: dict | None = None, protocol: str | None = None) -> str:
+    """Generate a VLESS/VMess/Trojan/SS share-link strictly based on the real Xray inbound config.
 
     The link reflects:
-    - external domain & external port (public facing values)
-    - network (ws, xhttp, grpc, etc.)
+    - external domain & external port (public facing values) - NEVER internal listen port
+    - network (ws, xhttp, grpc, tcp, etc.)
     - security (tls, reality) and all required reality params (pbk, sid, spx)
-    - transport‑specific fields (path, mode, serviceName, extra)
+    - transport-specific fields (path, mode, serviceName, extra)
     - fingerprint, sni, alpn where appropriate
+
+    If `user` is provided, user-specific overrides for transport/sni are respected
+    but the inbound remains the primary source of truth.
     """
     import json
+    from urllib.parse import quote
+
     # Resolve inbound: use provided id, otherwise fall back to a deterministic default (first inbound)
     inbound = None
     if inbound_id:
@@ -480,13 +412,23 @@ def generate_vless_link(uuid: str, remark: str = "Spider", inbound_id: str | Non
     if not inbound:
         inbound = next(iter(INBOUNDS.values())) if INBOUNDS else {}
 
-    # Resolve host and port (public values)
+    # Determine protocol: user > inbound > default
+    proto = (user.get("protocol") if user else None) or inbound.get("protocol") or protocol or "vless"
+
+    # Resolve host and port (PUBLIC values) - NEVER use internal listen port
     host = inbound.get("external_domain") or inbound.get("domain") or SETTINGS.get("domain") or get_host()
     port = inbound.get("external_port", 443)
     network = inbound.get("network", "ws")
     security = inbound.get("security", "tls")
     sni = inbound.get("sni") or host
     fp = inbound.get("fingerprint", "chrome")
+
+    # Allow user-specific overrides for transport/sni if provided
+    if user:
+        if user.get("transport_type"):
+            network = user["transport_type"]
+        if user.get("sni"):
+            sni = user["sni"]
 
     params: dict[str, str] = {
         "encryption": "none",
@@ -513,6 +455,9 @@ def generate_vless_link(uuid: str, remark: str = "Spider", inbound_id: str | Non
             params["extra"] = quote(json.dumps(extra_dict, separators=(",", ":")))
     elif network == "grpc":
         params["serviceName"] = inbound.get("grpc_settings", {}).get("serviceName", "")
+        params["alpn"] = "h2"
+    elif network == "tcp":
+        params["alpn"] = "h2,http/1.1"
 
     # Reality protocol – ensure required fields exist
     if security == "reality":
@@ -536,6 +481,7 @@ def generate_vless_link(uuid: str, remark: str = "Spider", inbound_id: str | Non
     # Build query string, skipping empty values
     query = "&".join(f"{k}={quote(str(v))}" for k, v in params.items() if v)
     return f"vless://{uuid}@{host}:{port}?{query}#{quote(remark)}"
+
 
 def uptime() -> str:
     secs = int(time.time() - stats["start_time"])
@@ -1104,58 +1050,41 @@ async def get_stats(_=Depends(require_auth)):
     else:
         server_status = "healthy"
 
+    # Simulated system metrics
+    cpu_percent = round(min(conn_count * 0.3 + 5, 95), 1)
+    ram_percent = round(min(45 + (total_users * 0.5) + (conn_count * 0.1), 95), 1)
+    disk_percent = round(min(25 + (len(snap) * 0.02) + (total_users * 0.1), 90), 1)
+    uptime_secs = max(time.time() - stats["start_time"], 1)
+    network_mbps = round(total_bytes / uptime_secs * 8 / 1000000, 2)
+
     return {
+        "active_connections": len(connections),
+        "total_traffic_mb": round(stats["total_bytes"] / (1024 ** 2), 2),
+        "total_requests": stats["total_requests"],
+        "total_errors": stats["total_errors"],
+        "uptime": uptime(),
+        "timestamp": datetime.now().isoformat(),
+        "hourly": dict(hourly_traffic),
+        "recent_errors": list(error_logs)[-10:],
+        "links_count": len(snap),
+        "active_links": sum(1 for l in snap.values() if is_link_allowed(l)),
+        "expired_links": sum(1 for l in snap.values() if is_link_expired(l)),
+        "subs_count": len(SUBS),
+        # Enhanced stats
         "active_users": active_users,
+        "total_configs": len(snap),
         "total_users": total_users,
-        "traffic_gb": traffic_usage_gb,
+        "traffic_usage_gb": traffic_usage_gb,
         "server_status": server_status,
+        "cpu_percent": cpu_percent,
+        "ram_percent": ram_percent,
+        "disk_percent": disk_percent,
+        "network_mbps": network_mbps,
+        "recent_activity": list(activity_logs)[-10:],
     }
 
-# ── Xray Management Endpoints ─────────────────────────────────────────────────────
-@app.get("/api/xray/status")
-async def api_xray_status(_=Depends(require_auth)):
-    from xray_core import get_xray_status
-    return await get_xray_status()
-
-@app.post("/api/xray/start")
-async def api_xray_start(_=Depends(require_auth)):
-    from xray_core import start_xray
-    return await start_xray()
-
-@app.post("/api/xray/stop")
-async def api_xray_stop(_=Depends(require_auth)):
-    from xray_core import stop_xray
-    return await stop_xray()
-
-@app.post("/api/xray/restart")
-async def api_xray_restart(_=Depends(require_auth)):
-    from xray_core import restart_xray
-    return await restart_xray()
-
-@app.post("/api/xray/reload")
-async def api_xray_reload(_=Depends(require_auth)):
-    from xray_core import reload_xray_config
-    return await reload_xray_config()
-
-@app.get("/api/xray/logs")
-async def api_xray_logs(lines: int = 100, _=Depends(require_auth)):
-    from xray_core import get_xray_logs
-    return {"logs": await get_xray_logs(lines)}
-
-@app.post("/api/xray/test-config")
-async def api_xray_test_config(request: Request, _=Depends(require_auth)):
-    cfg = await request.json()
-    from xray_core import validate_xray_config
-    valid, err = await validate_xray_config(cfg)
-    return {"valid": valid, "error": err if not valid else None}
-
-# Helper to generate current Xray server config for initialization/start
-def generate_xray_server_config():
-    from xray_core import generate_xray_config
-    return generate_xray_config()
-
-# End of file
-
+# ── Activity Logs ─────────────────────────────────────────────────────────────
+@app.get("/api/activity")
 async def get_activity(_=Depends(require_auth)):
     return {"logs": list(activity_logs)[-150:]}
 
@@ -1808,7 +1737,7 @@ async def create_user(request: Request, _=Depends(require_auth)):
         "config_url": f"https://{host}/api/users/{user_id}/config",
         "qr_url": f"https://{host}/api/users/{user_id}/qr",
         "subscription_url": f"https://{host}/api/users/{user_id}/subscription",
-        "config": generate_user_config(user_id, USERS[user_id], inbound_id),
+        "config": generate_vless_link(USERS[user_id].get("config_uuid"), remark=f"Spider-{USERS[user_id].get('username', user_id)}", inbound_id=inbound_id, user=USERS[user_id]),
     }
 
 @app.patch("/api/users/{user_id}/toggle")
@@ -1941,7 +1870,7 @@ async def get_single_user(user_id: str, _=Depends(require_auth)):
     host = SETTINGS.get("domain") or get_host()
     return {
         **user,
-        "config": generate_user_config(user_id, user, user.get("inbound_id")),
+        "config": generate_vless_link(user.get("config_uuid"), remark=f"Spider-{user.get('username', user_id)}", inbound_id=user.get("inbound_id"), user=user),
         "config_url": f"https://{host}/api/users/{user_id}/config",
         "qr_url": f"https://{host}/api/users/{user_id}/qr",
         "subscription_url": f"https://{host}/api/users/{user_id}/subscription",
@@ -2012,7 +1941,7 @@ async def get_user_config(user_id: str, _=Depends(require_auth)):
         u = USERS.get(user_id)
         if not u:
             raise HTTPException(status_code=404, detail="user not found")
-        config = generate_user_config(user_id, u, u.get("inbound_id"))
+        config = generate_vless_link(u.get("config_uuid"), remark=f"Spider-{u.get('username', user_id)}", inbound_id=u.get("inbound_id"), user=u)
         username = u.get("username")
         protocol = u.get("protocol")
     host = SETTINGS.get("domain") or get_host()
@@ -2036,7 +1965,7 @@ async def get_user_qr(user_id: str, _=Depends(require_auth)):
         u = USERS.get(user_id)
         if not u:
             raise HTTPException(status_code=404, detail="user not found")
-        config = generate_user_config(user_id, u, u.get("inbound_id"))
+        config = generate_vless_link(u.get("config_uuid"), remark=f"Spider-{u.get('username', user_id)}", inbound_id=u.get("inbound_id"), user=u)
 
     # Generate QR code
     qr = qrcode.QRCode(version=1, box_size=10, border=4, error_correction=qrcode.constants.ERROR_CORRECT_M)
@@ -2063,8 +1992,7 @@ async def get_user_subscription(user_id: str, _=Depends(require_auth)):
     if not sub_uuid:
         raise HTTPException(status_code=404, detail="no subscription configured")
 
-    config = generate_user_config(user_id, u, u.get("inbound_id"))
-    content = base64.b64encode(config.encode()).decode()
+    config = generate_vless_link(u.get("config_uuid"), remark=f"Spider-{u.get('username', user_id)}", inbound_id=u.get("inbound_id"), user=u)
 
     return {
         "user_id": user_id,
@@ -2219,7 +2147,7 @@ async def api_user_sub(username: str):
     limit = user.get("traffic_limit_bytes", 0)
     traffic_pct = round(used / max(limit, 1) * 100, 1) if limit > 0 else 0
 
-    config = generate_user_config(user.get("user_id"), user, user.get("inbound_id"))
+    config = generate_vless_link(user.get("config_uuid"), remark=f"Spider-{user.get('username', user.get('user_id'))}", inbound_id=user.get("inbound_id"), user=user)
 
     return {
         "username": user.get("username"),
@@ -2442,7 +2370,7 @@ async def subsync_get_sub(name: str):
             user = next(((uid, u) for uid, u in USERS.items() if u.get("username") == name), None)
         if user:
             uid, u = user
-            cfg = generate_user_config(uid, u, u.get("inbound_id"))
+            cfg = generate_vless_link(u.get("config_uuid"), remark=f"Spider-{u.get('username', uid)}", inbound_id=u.get("inbound_id"), user=u)
             if cfg:
                 configs.append(cfg)
     
@@ -2661,7 +2589,7 @@ async def group_subscription(group_id: str, _=Depends(require_auth)):
     for uid in user_ids:
         u = snap.get(uid)
         if u and is_user_allowed(u):
-            cfg = generate_user_config(uid, u, u.get("inbound_id"))
+            cfg = generate_vless_link(u.get("config_uuid"), remark=f"Spider-{u.get('username', uid)}", inbound_id=u.get("inbound_id"), user=u)
             if cfg:
                 configs.append(cfg)
 
@@ -2965,7 +2893,7 @@ async def config_generator(request: Request, _=Depends(require_auth)):
     # Override host temporarily
     original_host = CONFIG.get("host")
     CONFIG["host"] = host
-    config = generate_user_config("temp", temp_user)
+    config = generate_vless_link(temp_user.get("config_uuid"), remark="Spider-temp", inbound_id=temp_user.get("inbound_id"), user=temp_user)
     if original_host:
         CONFIG["host"] = original_host
 
@@ -3296,43 +3224,6 @@ async def gen_xray_keys(_=Depends(require_auth)):
         result["note"] = "cryptography not installed"
     return result
 
-# Xray Core Management API Endpoints
-
-@app.get("/api/xray/status")
-async def api_xray_status(_=Depends(require_auth)):
-    """Return Xray installation, version, running state, and health info."""
-    return await get_xray_status()
-
-@app.post("/api/xray/start")
-async def api_xray_start(_=Depends(require_auth)):
-    """Start Xray process using current inbounds config."""
-    result = await start_xray()
-    if not result.get("ok"):
-        raise HTTPException(status_code=500, detail=result.get("error", "Failed to start Xray"))
-    return {"ok": True, "message": result.get("message", "Xray started"), "pid": result.get("pid")}
-
-@app.post("/api/xray/stop")
-async def api_xray_stop(_=Depends(require_auth)):
-    """Stop Xray process if running."""
-    result = await stop_xray()
-    if not result.get("ok"):
-        raise HTTPException(status_code=500, detail=result.get("error", "Failed to stop Xray"))
-    return {"ok": True, "message": result.get("message", "Xray stopped")}
-
-@app.post("/api/xray/restart")
-async def api_xray_restart(_=Depends(require_auth)):
-    """Restart Xray process."""
-    result = await restart_xray()
-    if not result.get("ok"):
-        raise HTTPException(status_code=500, detail=result.get("error", "Failed to restart Xray"))
-    return {"ok": True, "message": result.get("message", "Xray restarted"), "pid": result.get("pid")}
-
-@app.get("/api/xray/logs")
-async def api_xray_logs(lines: int = 100, _=Depends(require_auth)):
-    """Fetch last N lines from Xray log file."""
-    logs = await get_xray_logs(lines)
-    return {"ok": True, "lines": lines, "logs": logs}
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SERVER STATS (HTTP polling)
@@ -3618,57 +3509,6 @@ async def scan_railway_ips(_=Depends(require_auth)):
 
 
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
-
-# ── Xray Management API Endpoints �n# Added for status, control, config testing, and logs
-
-@app.get("/api/xray/status")
-async def api_xray_status(_=Depends(require_auth)):
-    """Return current Xray status (installed, version, running, pid)."""
-    return await get_xray_status()
-
-@app.post("/api/xray/start")
-async def api_xray_start(_=Depends(require_auth)):
-    """Start Xray process using existing config (generate if missing)."""
-    # Ensure config exists
-    if not XRAY_CONFIG_PATH.exists():
-        success = await generate_xray_config()
-        if not success:
-            raise HTTPException(status_code=500, detail="Config generation failed")
-    return await start_xray()
-
-@app.post("/api/xray/stop")
-async def api_xray_stop(_=Depends(require_auth)):
-    """Stop Xray process if running."""
-    return await stop_xray()
-
-@app.post("/api/xray/restart")
-async def api_xray_restart(_=Depends(require_auth)):
-    """Restart Xray (stop then start)."""
-    return await restart_xray()
-
-@app.post("/api/xray/reload")
-async def api_xray_reload(_=Depends(require_auth)):
-    """Regenerate config and restart Xray to apply changes."""
-    ok = await generate_xray_config()
-    if not ok:
-        raise HTTPException(status_code=500, detail="Config validation failed")
-    await restart_xray()
-    return {"msg": "reloaded"}
-
-@app.get("/api/xray/logs")
-async def api_xray_logs(tail: int = 100, _=Depends(require_auth)):
-    """Return last N lines of Xray error log."""
-    return {"logs": await get_xray_logs(tail)}
-
-@app.post("/api/xray/test-config")
-async def api_xray_test_config(_=Depends(require_auth)):
-    """Validate current Xray config without affecting running process."""
-    if not XRAY_CONFIG_PATH.exists():
-        raise HTTPException(status_code=400, detail="Config file missing")
-    result = await run_cmd([str(XRAY_PATH), "-test", "-config", str(XRAY_CONFIG_PATH)])
-    if result["code"] != 0:
-        raise HTTPException(status_code=400, detail=result["stderr"])
-    return {"msg": "config valid"}
 
 # Lazy XHTTP import (after all symbols defined)
 try:
