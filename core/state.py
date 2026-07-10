@@ -86,6 +86,22 @@ def uptime() -> str:
     h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
     return f"{h:02d}:{m:02d}:{s:02d}"
 
+def find_user_by_uuid(user_uuid: str) -> "tuple[str | None, dict | None]":
+    """Resolve a user by subscription uuid. Returns (user_id, user) or (None, None)."""
+    for uid, u in USERS.items():
+        if u.get("uuid") == user_uuid:
+            return uid, u
+    return None, None
+
+def find_user_by_username(username: str) -> "tuple[str | None, dict | None]":
+    for uid, u in USERS.items():
+        if u.get("username") == username:
+            return uid, u
+    return None, None
+
+def now_ir() -> datetime:
+    return datetime.now(IRAN_TZ)
+
 def parse_size_to_bytes(value: float, unit: str) -> int:
     unit = unit.upper()
     if unit == "GB": return int(value * 1024 ** 3)
@@ -190,6 +206,12 @@ async def load_state():
             IP_BLACKLIST.update(data.get("ip_blacklist", []))
     except Exception as e:
         print(f"Could not load state: {e}")
+    # Backfill a stable `uuid` for every user (subscription identifier).
+    # Old records may lack it; derive deterministically and persist on next save.
+    for uid, u in USERS.items():
+        if not u.get("uuid"):
+            import uuid as _uuid
+            u["uuid"] = str(_uuid.uuid4())
     _rebuild_path_index()
     _migrate_user_links()
 

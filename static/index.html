@@ -1175,31 +1175,15 @@ function openCreateInbound() {
   openModal('mod-inbound');
 }
 
-function editInbound(iid) {
-  var ib = ALL_IB.find(function(x) { return x.inbound_id === iid; });
-  if (!ib) return;
-  $id('ib-title').textContent = 'ویرایش اینباند';
-  $id('ib-id').value = iid;
-  $id('ib-name').value = ib.name || '';
-  $id('ib-proto').value = ib.protocol || 'vless';
-  $id('ib-port').value = ib.port || '';
-  $id('ib-ext-port').value = ib.external_port || '';
-  $id('ib-domain').value = ib.domain || '';
-  $id('ib-sni').value = ib.sni || '';
-  $id('ib-network').value = ib.network || 'ws';
-  $id('ib-security').value = ib.security || 'tls';
-  $id('ib-fingerprint').value = ib.fingerprint || 'chrome';
-  $id('ib-submit').textContent = 'بروزرسانی اینباند';
-  onInboundProtoChange();
-  openModal('mod-inbound');
-}
-
 function onInboundProtoChange() {
   var p = $id('ib-proto').value;
   var secWrap = $id('ib-sec-wrap');
+  // Only show/hide the security selector based on protocol.
+  // NEVER overwrite the security value here — editInbound/openCreateInbound
+  // own that. Overwriting it used to reset a stored 'reality' back to 'tls',
+  // hiding the Reality fields and dropping reality_settings on save.
   if (p === 'vless' || p === 'vmess' || p === 'trojan') {
     secWrap.classList.remove('hidden');
-    $id('ib-security').value = 'tls';
   } else {
     secWrap.classList.add('hidden');
   }
