@@ -15,6 +15,9 @@ from fastapi.responses import HTMLResponse, Response, JSONResponse
 from pydantic import BaseModel
 
 from config import logger, SESSION_COOKIE, SESSION_TTL, AUTH
+from pathlib import Path
+
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 from core.state import (
     LINKS, LINKS_LOCK, SUBS, SUBS_LOCK,
     USERS, USERS_LOCK,
@@ -199,16 +202,32 @@ async def user_subscription(key: str, request: Request):
 
 @router.get("/sub/{key}")
 async def subscription_text(key: str, request: Request):
-    """Client-importable subscription: text/plain VLESS config(s) for a user.
+    """Subscription endpoint for a user.
 
     `key` is the user's subscription uuid (preferred) or legacy username.
-    Importable directly by V2RayNG / Hiddify / Nekoray / Shadowrocket.
+
+    Content negotiation:
+      - Browser (Accept: text/html)  -> serve the rich sub.html UI that shows
+        real-time traffic/usage and pulls the config for the user.
+      - Client (V2RayNG/Hiddify/Nekoray/Shadowrocket, Accept: */*) ->
+        raw text/plain VLESS config(s), directly importable.
     """
     uid, user = find_user_by_uuid(key)
     if uid is None:
         uid, user = find_user_by_username(key)
     if uid is None or user is None:
+        # For browsers, still render the UI (it will show "user not found").
+        if "text/html" in (request.headers.get("accept") or ""):
+            from fastapi.responses import FileResponse
+            return FileResponse(str(STATIC_DIR / "sub.html"))
         raise HTTPException(status_code=404, detail="اشتراک یافت نشد")
+
+    # Browser -> rich UI (reads ?uuid= or the path segment itself).
+    if "text/html" in (request.headers.get("accept") or ""):
+        from fastapi.responses import FileResponse
+        return FileResponse(str(STATIC_DIR / "sub.html"))
+
+    # Client -> raw text/plain subscription.
     payload = await _user_config_payload(uid)
     if not payload.get("success"):
         raise HTTPException(status_code=400, detail=payload.get("error", "اشتراک ناقص است"))

@@ -257,6 +257,18 @@ async function doPing(){
 function toggleTheme(){var t=document.documentElement;var cur=t.getAttribute('data-theme')||'dark';var nxt=cur==='dark'?'light':'dark';t.setAttribute('data-theme',nxt);localStorage.setItem('spider-sub-theme',nxt)}
 (function(){var s=localStorage.getItem('spider-sub-theme')||'dark';document.documentElement.setAttribute('data-theme',s)})();
 
+// Real-time: refresh usage/traffic every 5s without rebuilding the whole page.
+async function refresh(){
+  if(!uuid) return;
+  try{
+    var r=await fetch('/api/sub/'+uuid,{cache:'no-store'});
+    if(!r.ok) return;
+    var d=await r.json();
+    if(d && d.success){ _data=d; _cfg=d.config||d.vless_link||_cfg; render(d); }
+  }catch(e){ /* keep last good view on transient errors */ }
+}
+setInterval(refresh, 5000);
+
 load();
 </script>
 </body>
