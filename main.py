@@ -50,7 +50,10 @@ from services.xray_service import (
 )
 
 # ── Import routers ─────────────────────────────────────────────────────────
-from routers.xhttp import router as xhttp_router
+# routers/xhttp.py was removed in the flat rewrite; the XHTTP router now lives
+# at the package root (xhttp_siz10). It imports from core.state/config, NOT main,
+# so there is no circular import.
+from xhttp_siz10 import router as xhttp_router
 from routers.web import router as web_router
 
 # ── Telegram First-Run Paths ───────────────────────────────────────────────

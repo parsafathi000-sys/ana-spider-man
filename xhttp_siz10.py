@@ -15,17 +15,12 @@ from datetime import datetime
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
 
-from main import (
-    LINKS,
-    LINKS_LOCK,
-    stats,
-    hourly_traffic,
-    connections,
-    error_logs,
-    logger,
-    is_link_allowed,
-    save_state,
+from core.state import (
+    LINKS, LINKS_LOCK,
+    stats, hourly_traffic, connections, error_logs,
+    is_link_allowed, save_state,
 )
+from config import logger
 from relay_vless import parse_vless_header, check_and_use
 
 router = APIRouter()

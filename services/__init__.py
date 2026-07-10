@@ -1,9 +1,11 @@
 """Services package.
 
-NOTE: all Xray logic (install, keys, config generation, link generation,
-process control) lives in `xray_service`. The old `xray_core` module was a
-conflicting duplicate (different path constant + fake checksums) and has been
-removed. Do NOT reintroduce a second xray module.
+All Xray logic (install, keys, config generation, link generation, process
+control) lives in `xray_service`. The old `xray_core` module was a conflicting
+duplicate and has been removed. Do NOT reintroduce a second xray module.
+
+NOTE: `relay_vless` and `xhttp_siz10` are root-level modules (not in this
+package) in the flat layout, so they are NOT re-exported here.
 """
 from .xray_service import (
     generate_vless_link,
@@ -20,15 +22,4 @@ from .xray_service import (
     validate_xray_config,
     write_xray_config,
     RealityIncompleteError,
-)
-
-from .relay_vless import (
-    parse_vless_header,
-    check_and_use,
-    websocket_tunnel,
-    _ws_client_ip,
-)
-
-from .xhttp_siz10 import (
-    router as xhttp_siz10_router,
 )
