@@ -18,6 +18,7 @@ from config import (
     XRAY_BINARY_PATH, XRAY_CONFIG_PATH, XRAY_ASSETS_DIR, XRAY_LOG_DIR,
     hash_password,
 )
+from core.state import generate_uuid
 import aiofiles
 
 logger = logging.getLogger("xray_service")

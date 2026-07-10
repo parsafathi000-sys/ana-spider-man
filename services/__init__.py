@@ -34,9 +34,3 @@ from .relay_vless import (
 from .xhttp_siz10 import (
     router as xhttp_siz10_router,
 )
-
-from .pages import (
-    LOGIN_HTML,
-    DASHBOARD_HTML,
-    get_public_page_html,
-)

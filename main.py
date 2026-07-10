@@ -5,18 +5,22 @@ ALL business logic moved to config/, state.py, services/, routers/
 """
 import asyncio
 import logging
-import os
+import secrets
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Request, HTTPException, Depends, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response, HTMLResponse, JSONResponse, RedirectResponse, FileResponse, StreamingResponse
+from fastapi.responses import Response, JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import httpx
+
+# ── Project layout (never hardcode paths) ───────────────────────────────────
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
 
 # ── Import new modules ─────────────────────────────────────────────────────
 from config import (
@@ -47,11 +51,11 @@ from services.xray_service import (
 
 # ── Import routers ─────────────────────────────────────────────────────────
 from routers.xhttp import router as xhttp_router
-from routers.pages import router as pages_router
+from routers.web import router as web_router
 
 # ── Telegram First-Run Paths ───────────────────────────────────────────────
 TELEGRAM_FLAG_FILE = DATA_DIR / "telegram_seen.flag"
-TELEGRAM_LINK_FILE = Path(__file__).parent / "link.txt"
+TELEGRAM_LINK_FILE = BASE_DIR / "data" / "link.txt"
 
 # ── FastAPI App ────────────────────────────────────────────────────────────
 app = FastAPI(title="Spider Gateway", docs_url=None, redoc_url=None)
@@ -66,14 +70,12 @@ app.add_middleware(
 )
 
 # Static files
-import os as _os
-_STATIC_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "static")
-if _os.path.exists(_STATIC_DIR):
-    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Include routers
 app.include_router(xhttp_router)
-app.include_router(pages_router)
+app.include_router(web_router)
 
 # ── HTTP Client ────────────────────────────────────────────────────────────
 http_client: httpx.AsyncClient | None = None
@@ -85,25 +87,25 @@ async def startup():
     limits = httpx.Limits(max_connections=500, max_keepalive_connections=100)
     timeout = httpx.Timeout(30.0, connect=10.0)
     http_client = httpx.AsyncClient(limits=limits, timeout=timeout, follow_redirects=True)
-    
+
     stats["start_time"] = asyncio.get_event_loop().time()
-    
+
     await load_state()
-    
+
     # CRITICAL: Validate Xray binary exists and works before starting service
     if not await is_xray_installed():
         error_msg = f"Xray Core binary not found at {XRAY_BINARY_PATH}. Build failed: Xray installation missing."
         logger.critical(error_msg)
         raise RuntimeError(error_msg)
-    
+
     version = await get_xray_version()
     if not version:
         error_msg = f"Xray binary at {XRAY_BINARY_PATH} is not executable or corrupted."
         logger.critical(error_msg)
         raise RuntimeError(error_msg)
-    
+
     logger.info(f"Xray Core validated: version {version} at {XRAY_BINARY_PATH}")
-    
+
     # Auto-create default inbound if none exist
     async with INBOUNDS_LOCK:
         if not INBOUNDS:
@@ -123,7 +125,7 @@ async def startup():
             }
             await save_state()
             log_activity("inbound", "اینباند پیش‌فرض VLESS+WS ساخته شد", "ok")
-    
+
     log_activity("system", "سرور راه‌اندازی شد", "ok")
     logger.info(f"Spider Gateway v9.2 started on port {CONFIG['port']}")
 
@@ -133,6 +135,15 @@ async def shutdown():
     await save_state()
     if http_client:
         await http_client.aclose()
+
+# ── Static UI routes ───────────────────────────────────────────────────────
+@app.get("/")
+async def index():
+    return FileResponse(str(STATIC_DIR / "index.html"))
+
+@app.get("/sub")
+async def sub():
+    return FileResponse(str(STATIC_DIR / "sub.html"))
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 def client_ip(request: Request) -> str:
@@ -146,7 +157,6 @@ def client_ip(request: Request) -> str:
 
 # ── Auth ───────────────────────────────────────────────────────────────────
 async def create_session() -> str:
-    import secrets
     token = secrets.token_urlsafe(32)
     async with SESSIONS_LOCK:
         SESSIONS[token] = asyncio.get_event_loop().time() + SESSION_TTL
@@ -177,10 +187,6 @@ async def require_auth(request: Request):
     return token
 
 # ── Basic endpoints ────────────────────────────────────────────────────────
-@app.get("/")
-async def root():
-    return {"service": "Spider Gateway", "version": "9.2", "status": "active", "channel": "https://t.me/SpiderPanel"}
-
 @app.get("/health")
 async def health():
     return {"status": "ok", "connections": len(connections), "uptime": uptime()}
@@ -192,12 +198,11 @@ async def telegram_status():
     seen = TELEGRAM_FLAG_FILE.exists()
     if seen:
         return {"seen": True}
-    # Read URL from link.txt
+    # Read URL from data/link.txt
     url = "https://t.me/SpiderPanel"
     if TELEGRAM_LINK_FILE.exists():
         try:
-            with open(TELEGRAM_LINK_FILE, "r") as f:
-                url = f.read().strip()
+            url = TELEGRAM_LINK_FILE.read_text().strip()
         except Exception:
             pass
     return {"seen": False, "url": url}
