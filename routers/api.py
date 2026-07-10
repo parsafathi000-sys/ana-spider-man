@@ -23,7 +23,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from config import AUTH, SESSION_COOKIE, SESSION_TTL, hash_password, get_host
+from config import AUTH, SESSION_COOKIE, SESSION_TTL, hash_password, get_host, logger
 from core.state import (
     USERS, USERS_LOCK,
     INBOUNDS, INBOUNDS_LOCK,
@@ -37,6 +37,8 @@ from services.xray_service import (
     ensure_reality_keys,
     generate_reality_keypair,
     RealityIncompleteError,
+    restart_xray,
+    generate_xray_server_config,
 )
 
 router = APIRouter()
@@ -140,6 +142,24 @@ def _inbound_out(iid: str, ib: dict) -> dict:
     }
 
 
+# ── Xray sync ───────────────────────────────────────────────────────────────
+async def _sync_xray() -> None:
+    """Rebuild the Xray config from current users/inbounds and reload Xray.
+
+    Called after any user create/update/delete so the generated link's UUID
+    is guaranteed to exist as a client in /app/xray-config/config.json. Without
+    this, a freshly created user's link would reference a client Xray never
+    learned about, so the connection would fail.
+    """
+    try:
+        cfg = generate_xray_server_config()
+        result = await restart_xray(cfg)
+        if not result.get("ok"):
+            logger.warning(f"Xray sync (restart) failed: {result.get('error')}")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Xray sync skipped/failed: {e}")
+
+
 # ── Users ───────────────────────────────────────────────────────────────────
 @router.get("/api/users")
 async def list_users():
@@ -157,6 +177,7 @@ async def create_user(body: CreateUserReq):
         for u in USERS.values():
             if u.get("username") == username:
                 raise HTTPException(status_code=409, detail="این نام کاربری قبلاً وجود دارد")
+        import uuid as _uuid
         uid = generate_uuid()
         limit_bytes = int(body.traffic_limit_gb * 1073741824) if body.traffic_limit_gb > 0 else 0
         expire_at = None
@@ -164,8 +185,8 @@ async def create_user(body: CreateUserReq):
             expire_at = (datetime.now() + timedelta(days=body.expire_days)).isoformat()
         USERS[uid] = {
             "username": username,
-            "uuid": __import__("uuid").uuid4().hex,
-            "config_uuid": generate_uuid(),
+            "uuid": str(_uuid.uuid4()),
+            "config_uuid": str(_uuid.uuid4()),
             "traffic_limit_bytes": limit_bytes,
             "traffic_used_bytes": 0,
             "expire_at": expire_at,
@@ -175,6 +196,9 @@ async def create_user(body: CreateUserReq):
             "created_at": datetime.now().isoformat(),
         }
         await save_state()
+    # Sync the new client into Xray (rebuild config + reload) so the link's
+    # UUID actually exists as a client in /app/xray-config/config.json.
+    await _sync_xray()
     return {"user_id": uid, "username": username}
 
 
@@ -197,6 +221,7 @@ async def update_user(uid: str, body: UpdateUserReq):
         if body.reset_traffic:
             u["traffic_used_bytes"] = 0
         await save_state()
+    await _sync_xray()
     return {"success": True}
 
 
@@ -218,6 +243,7 @@ async def delete_user(uid: str):
             raise HTTPException(status_code=404, detail="کاربر یافت نشد")
         USERS.pop(uid)
         await save_state()
+    await _sync_xray()
     return {"success": True}
 
 
@@ -227,6 +253,16 @@ async def list_inbounds():
     async with INBOUNDS_LOCK:
         inbounds = [_inbound_out(iid, ib) for iid, ib in INBOUNDS.items()]
     return {"inbounds": inbounds}
+
+
+@router.get("/api/inbounds/{iid}")
+async def get_inbound(iid: str):
+    async with INBOUNDS_LOCK:
+        ib = INBOUNDS.get(iid)
+        if not ib:
+            raise HTTPException(status_code=404, detail="اینباند یافت نشد")
+        out = _inbound_out(iid, ib)
+    return out
 
 
 def _normalize_reality(body: CreateInboundReq) -> dict:
@@ -269,6 +305,13 @@ async def create_inbound(body: CreateInboundReq):
     async with INBOUNDS_LOCK:
         INBOUNDS[iid] = ib
         await save_state()
+    # For Reality inbounds, make sure pbk/sid exist before rebuilding Xray.
+    if ib.get("security") == "reality":
+        try:
+            await ensure_reality_keys(iid)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Reality key ensure failed for {iid}: {e}")
+    await _sync_xray()
     return {"inbound_id": iid, "success": True}
 
 
@@ -295,6 +338,12 @@ async def update_inbound(iid: str, body: CreateInboundReq):
             "grpc_settings": body.grpc_settings,
         })
         await save_state()
+    if ib.get("security") == "reality":
+        try:
+            await ensure_reality_keys(iid)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Reality key ensure failed for {iid}: {e}")
+    await _sync_xray()
     return {"inbound_id": iid, "success": True}
 
 
@@ -305,6 +354,7 @@ async def delete_inbound(iid: str):
             raise HTTPException(status_code=404, detail="اینباند یافت نشد")
         INBOUNDS.pop(iid)
         await save_state()
+    await _sync_xray()
     return {"success": True}
 
 

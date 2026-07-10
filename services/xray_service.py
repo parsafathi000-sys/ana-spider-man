@@ -13,6 +13,15 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+# Defaults shared between the VLESS link generator and the Xray server config
+# so the link's `extra` JSON exactly mirrors xray's xhttpSettings.
+XHTTP_DEFAULTS: Dict[str, Any] = {
+    "path": "/",
+    "mode": "auto",
+    "xPaddingBytes": "100-1000",
+    "scMaxEachPostBytes": "1000000",
+}
+
 from config import (
     IRAN_TZ, SETTINGS, CONFIG, get_host,
     XRAY_BINARY_PATH, XRAY_CONFIG_PATH, XRAY_ASSETS_DIR, XRAY_LOG_DIR,
@@ -457,10 +466,13 @@ def generate_vless_link(
         params["alpn"] = "http/1.1"
     elif network == "xhttp":
         xh = inbound.get("xhttp_settings", {})
+        # Apply the same defaults the SERVER config uses, so the link's `extra`
+        # exactly mirrors xray's xhttpSettings (no mismatch that breaks xhttp).
+        xh = {**XHTTP_DEFAULTS, **xh}
         params["path"] = xh.get("path", "/")
         params["mode"] = xh.get("mode", "auto")
         # Encode the remaining xhttp settings as `extra` (URL-encoded JSON),
-        # exactly mirroring what Xray uses.
+        # mirroring what Xray uses. `path`/`mode` are separate params.
         extra_dict = {k: v for k, v in xh.items() if k not in ("path", "mode")}
         if extra_dict:
             # Store RAW JSON here; the final builder URL-encodes it exactly once.
@@ -589,13 +601,12 @@ def _add_inbound_to_xray(cfg: Dict, ib: Dict, iid: str, host: str):
             }
         }
         if network == "xhttp":
+            merged_xh = {**XHTTP_DEFAULTS, **xh_settings}
             inbound_obj["streamSettings"]["xhttpSettings"] = {
-                "path": xh_settings.get("path", "/"),
-                "mode": xh_settings.get("mode", "auto"),
-                "xPaddingBytes": xh_settings.get("xPaddingBytes", "100-1000"),
-                "scMaxEachPostBytes": xh_settings.get("scMaxEachPostBytes", "1000000"),
-                "scMaxBufferedPosts": xh_settings.get("scMaxBufferedPosts", 30),
-                "scStreamUpServerSecs": xh_settings.get("scStreamUpServerSecs", "20-80"),
+                "path": merged_xh.get("path", "/"),
+                "mode": merged_xh.get("mode", "auto"),
+                "xPaddingBytes": merged_xh.get("xPaddingBytes", "100-1000"),
+                "scMaxEachPostBytes": merged_xh.get("scMaxEachPostBytes", "1000000"),
             }
     elif security == "tls":
         stream = {
@@ -622,11 +633,15 @@ def _add_inbound_to_xray(cfg: Dict, ib: Dict, iid: str, host: str):
                 "serviceName": grpc_settings.get("serviceName", "")
             }
         elif network == "xhttp":
+            merged_xh = {**XHTTP_DEFAULTS, **xh_settings}
+            # Only emit the keys that appear in the link's `extra` (plus path/mode
+            # which are separate link params), so the server xhttpSettings is a
+            # 1:1 mirror of the generated subscription link.
             inbound_obj["streamSettings"]["xhttpSettings"] = {
-                "path": xh_settings.get("path", "/"),
-                "mode": xh_settings.get("mode", "auto"),
-                "xPaddingBytes": xh_settings.get("xPaddingBytes", "100-1000"),
-                "scMaxEachPostBytes": xh_settings.get("scMaxEachPostBytes", "1000000"),
+                "path": merged_xh.get("path", "/"),
+                "mode": merged_xh.get("mode", "auto"),
+                "xPaddingBytes": merged_xh.get("xPaddingBytes", "100-1000"),
+                "scMaxEachPostBytes": merged_xh.get("scMaxEachPostBytes", "1000000"),
             }
     else:
         inbound_obj["streamSettings"] = {"network": network}

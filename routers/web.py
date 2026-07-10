@@ -28,9 +28,28 @@ from core.state import (
 )
 from services.xray_service import (
     generate_vless_link as svc_generate_vless_link,
+    generate_xray_server_config,
     ensure_reality_keys,
     RealityIncompleteError,
 )
+
+
+def _client_exists_in_xray(cuuid: str, inbound_id: str) -> bool:
+    """True if `cuuid` is registered as a client in the given inbound of the
+    generated Xray server config (i.e. would be written to config.json)."""
+    if not cuuid:
+        return False
+    try:
+        cfg = generate_xray_server_config()
+    except Exception:
+        return False
+    for cin in cfg.get("inbounds", []):
+        if cin.get("tag") != f"inbound-{inbound_id}":
+            continue
+        for client in cin.get("settings", {}).get("clients", []):
+            if client.get("id") == cuuid:
+                return True
+    return False
 
 router = APIRouter()
 
@@ -94,6 +113,7 @@ async def _user_config_payload(user_id: str) -> dict:
     # Collect inbounds this user is allowed to use.
     inbound_ids = [user.get("inbound_id")] if user.get("inbound_id") else list(INBOUNDS.keys())
     configs = []
+    cuuid = user.get("config_uuid") or user_id
     for iid in inbound_ids:
         inbound = INBOUNDS.get(iid)
         if not inbound:
@@ -109,9 +129,19 @@ async def _user_config_payload(user_id: str) -> dict:
                     "missing": e.missing,
                     "inbound_id": iid,
                 }
+        # Validate the user's UUID is actually a real Xray client. If it is
+        # missing (e.g. user created but Xray never synced), rebuild + reload
+        # Xray and re-check; otherwise return a clear error instead of a
+        # broken link whose UUID does not exist in /app/xray-config/config.json.
+        if not _client_exists_in_xray(cuuid, iid):
+            try:
+                from services.xray_service import generate_xray_server_config, restart_xray
+                await restart_xray(generate_xray_server_config())
+            except Exception:
+                pass
         try:
             link = svc_generate_vless_link(
-                uuid=user.get("config_uuid") or user_id,
+                uuid=cuuid,
                 remark=f"spider-{user.get('username', user_id)}",
                 inbound_id=iid,
                 user=user,

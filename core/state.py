@@ -63,8 +63,14 @@ SESSIONS: Dict = {}
 
 # ── Helper Functions ──────────────────────────────────────────────────────
 def generate_uuid() -> str:
-    import secrets
-    return secrets.token_hex(16)
+    """Return a STANDARD dashed UUID4 (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).
+
+    Xray/VLESS client ids MUST be standard UUIDs. We never use the 32-char
+    hex form (uuid4().hex / token_hex) because it does not match the UUID
+    format Xray expects in its client `id` field, which breaks connections.
+    """
+    import uuid as _uuid
+    return str(_uuid.uuid4())
 
 def generate_short_id() -> str:
     import secrets
@@ -208,10 +214,20 @@ async def load_state():
         print(f"Could not load state: {e}")
     # Backfill a stable `uuid` for every user (subscription identifier).
     # Old records may lack it; derive deterministically and persist on next save.
+    # ALSO migrate any legacy 32-char hex config_uuid (no dashes) to a standard
+    # dashed UUID4 — Xray client `id` fields require the dashed format, otherwise
+    # the generated link's UUID never matches a real Xray client (no connection).
+    import re as _re
+    _HEX32 = _re.compile(r"^[0-9a-fA-F]{32}$")
     for uid, u in USERS.items():
         if not u.get("uuid"):
-            import uuid as _uuid
-            u["uuid"] = str(_uuid.uuid4())
+            u["uuid"] = str(__import__("uuid").uuid4())
+        elif _HEX32.match(str(u.get("uuid", ""))):
+            # Legacy 32-hex subscription uuid -> standard dashed UUID.
+            u["uuid"] = str(__import__("uuid").uuid4())
+        cu = u.get("config_uuid", "")
+        if _HEX32.match(str(cu)):
+            u["config_uuid"] = str(__import__("uuid").uuid4())
     _rebuild_path_index()
     _migrate_user_links()
 
