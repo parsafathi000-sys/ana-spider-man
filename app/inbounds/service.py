@@ -46,6 +46,7 @@ async def create_inbound(
     cert_path: str = "",
     key_path: str = "",
     alpn: str = "h2,http/1.1",
+    external_port: int | None = None,
     uuid: str | None = None,
 ) -> Inbound:
     res = await db.execute(select(Inbound).where(Inbound.tag == tag))
@@ -76,6 +77,7 @@ async def create_inbound(
         alpn=alpn,
         transport_path=transport_path,
         ws_host=ws_host,
+        external_port=external_port,
         xhttp_mode=xhttp_mode,
         xhttp_x_padding_bytes=xhttp_x_padding_bytes,
         xhttp_sc_max_each_post_bytes=xhttp_sc_max_each_post_bytes,
@@ -102,7 +104,7 @@ async def update_inbound(db: AsyncSession, ib: Inbound, **fields: Any) -> Inboun
         ib.public_key = pub
         ib.short_id = security_generate_short_id()
     allowed = {
-        "name", "port", "security", "network", "server_name", "spider_x",
+        "name", "port", "external_port", "security", "network", "server_name", "spider_x",
         "cert_path", "key_path", "alpn", "transport_path", "ws_host",
         "xhttp_mode", "xhttp_x_padding_bytes", "xhttp_sc_max_each_post_bytes",
         "xhttp_sc_max_concurrent_posts", "xhttp_extra", "enabled", "uuid",

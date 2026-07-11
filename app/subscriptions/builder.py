@@ -27,7 +27,10 @@ async def _active_domain(db: AsyncSession) -> str | None:
 
 def _build_vless(user: User, inbound: Inbound, sni: str, remark: str) -> str:
     host = sni
-    port = settings.public_port
+    # The server binds `inbound.port`; but the *client* connects to the
+    # externally reachable port, which can differ behind a NAT / TCP proxy.
+    # `external_port` (per-inbound) wins over the global public port when set.
+    port = inbound.external_port or settings.public_port
 
     params: dict[str, str] = {
         "type": inbound.network,  # xhttp | ws | tcp

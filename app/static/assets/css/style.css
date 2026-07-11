@@ -221,3 +221,17 @@ body {
   .table td { border: none; border-bottom: 1px solid rgba(255,26,60,.08); display: flex; justify-content: space-between; gap: 12px; }
   .table td::before { content: attr(data-label); color: var(--txt-dim); font-size: 11px; text-transform: uppercase; }
 }
+
+/* ---------- settings toggle ---------- */
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 4px; border-bottom: 1px solid rgba(255,26,60,.12); }
+.setting-row:last-child { border-bottom: none; }
+.setting-row .k { font-weight: 600; }
+.setting-row .sub { color: var(--txt-dim); font-size: 12px; margin-top: 2px; max-width: 520px; }
+.switch { position: relative; display: inline-block; width: 52px; height: 28px; flex: 0 0 auto; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .slider { position: absolute; cursor: pointer; inset: 0; background: rgba(255,26,60,.18);
+  border: 1px solid var(--glass-brd); border-radius: 999px; transition: .25s; }
+.switch .slider::before { content: ""; position: absolute; height: 20px; width: 20px; left: 4px; top: 3px;
+  background: var(--txt-dim); border-radius: 50%; transition: .25s; }
+.switch input:checked + .slider { background: var(--neon); box-shadow: var(--shadow-neon); }
+.switch input:checked + .slider::before { transform: translateX(24px); background: #fff; }

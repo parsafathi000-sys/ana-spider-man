@@ -40,6 +40,7 @@ async def create_inbound(payload: InboundCreate, db: AsyncSession = Depends(get_
             cert_path=payload.cert_path,
             key_path=payload.key_path,
             alpn=payload.alpn,
+            external_port=payload.external_port,
             uuid=payload.uuid,
         )
     except ValueError as e:

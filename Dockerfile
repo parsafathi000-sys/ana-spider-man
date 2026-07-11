@@ -46,7 +46,8 @@ ENV PORT=8000 \
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-CMD curl -fsS http://127.0.0.1:${PORT:-8000}/api/healthz || exit 1
+# NOTE: HEALTHCHECK disabled. The panel starts Xray as a child process during
+# lifespan; a curl-based healthcheck can flap and cause container restarts.
+# If you want a probe, point it at /api/healthz with a generous start-period.
 
-CMD ["sh","-c","uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh","-c","uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

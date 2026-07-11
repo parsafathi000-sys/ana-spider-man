@@ -101,10 +101,11 @@
     domains: renderDomains,
     subscription: renderSubscription,
     system: renderSystem,
+    settings: renderSettings,
   };
   const titles = {
     dashboard: "Dashboard", users: "Users", inbounds: "Inbounds",
-    domains: "Domains", subscription: "Subscriptions", system: "System",
+    domains: "Domains", subscription: "Subscriptions", system: "System", settings: "Settings",
   };
 
   async function showView(name) {
@@ -291,7 +292,7 @@
       <tr>
         <td data-label="Tag">${esc(ib.tag)}</td>
         <td data-label="Type">${ib.security} / ${ib.network}</td>
-        <td data-label="Port">${ib.port}</td>
+        <td data-label="Port">${ib.port}${ib.external_port && ib.external_port !== ib.port ? ` <span class=\"badge\">ext:${ib.external_port}</span>` : ""}</td>
         <td data-label="Reality">${ib.security === "reality" ? `pbk:${esc(ib.public_key.slice(0, 10))}…` : "—"}</td>
         <td data-label="Status"><span class="badge ${ib.enabled ? "active" : "disabled"}">${ib.enabled ? "on" : "off"}</span></td>
         <td data-label="Actions"><div class="row-actions">
@@ -329,11 +330,11 @@
         </div>
         <div class="field-row">
           <div class="field"><label>Port</label><input name="port" type="number" min="1" max="65535" value="443"></div>
-          <div class="field"><label>Security</label><select name="security"><option value="reality">reality</option><option value="tls">tls</option><option value="none">none</option></select></div>
+          <div class="field"><label>External port (client)</label><input name="external_port" type="number" min="1" max="65535" placeholder="same as Port"></div>
         </div>
         <div class="field-row">
+          <div class="field"><label>Security</label><select name="security"><option value="reality">reality</option><option value="tls">tls</option><option value="none">none</option></select></div>
           <div class="field"><label>Network</label><select name="network"><option value="xhttp">xhttp</option><option value="ws">ws</option><option value="tcp">tcp</option></select></div>
-          <div class="field"><label>XHTTP mode</label><select name="xhttp_mode"><option>auto</option><option>packet-up</option><option>packet-down</option><option>stream-up</option><option>stream-down</option></select></div>
         </div>
         <div class="field-row">
           <div class="field"><label>Server name (Reality dest)</label><input name="server_name" placeholder="target.com:443"></div>
@@ -354,6 +355,7 @@
         name: f.name, port: Number(f.port), security: f.security, network: f.network,
         server_name: f.server_name, spider_x: f.spider_x, transport_path: f.transport_path,
         ws_host: f.ws_host, xhttp_mode: f.xhttp_mode,
+        external_port: f.external_port ? Number(f.external_port) : null,
         enabled: f.enabled === "1",
       };
       if (!isEdit) payload.tag = f.tag;
@@ -480,6 +482,75 @@
     };
   }
 
+  /* ---- Settings ---- */
+  async function renderSettings(root) {
+    const s = await api("/settings").catch(() => ({}));
+    const music = await api("/settings/music/list").catch(() => ({ files: [] }));
+    const onOpen = s.music_on_open === "1";
+    const files = music.files || [];
+    root.innerHTML = `
+      <div class="panel glass">
+        <h3>PANEL SETTINGS</h3>
+        <div class="setting-row">
+          <div>
+            <div class="k">Music on open</div>
+            <div class="sub">Play a random track from <code>/musics</code> every time the panel opens.</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="set-music" ${onOpen ? "checked" : ""}>
+            <span class="slider"></span>
+          </label>
+        </div>
+        ${files.length ? `
+        <div class="field" style="margin-top:10px">
+          <label>Preview (${files.length} track${files.length > 1 ? "s" : ""} available)</label>
+          <div class="row-actions">
+            <button class="btn btn-sm" id="preview-music">▶ Preview random</button>
+            <span id="now-playing" class="sub"></span>
+          </div>
+        </div>` : `
+        <p class="muted" style="font-size:12px;margin-top:10px">
+          No audio files found in <code>/musics</code>. Drop <code>.mp3</code>/<code>.wav</code> files there (or run the bundled generator) to enable this feature.
+        </p>`}
+      </div>`;
+
+    const toggle = root.querySelector("#set-music");
+    toggle.onchange = async () => {
+      try {
+        await api("/settings", { method: "POST", body: { key: "music_on_open", value: toggle.checked ? "1" : "" } });
+        toast(toggle.checked ? "Music on open enabled" : "Music on open disabled");
+        localStorage.setItem("spider_music_on_open", toggle.checked ? "1" : "");
+      } catch (e) { toast(e.message, "err"); }
+    };
+
+    const preview = root.querySelector("#preview-music");
+    if (preview) preview.onclick = () => playRandomMusic(files, root.querySelector("#now-playing"));
+  }
+
+  let _musicAudio = null;
+  function playRandomMusic(files, labelEl) {
+    if (!files || !files.length) return;
+    const pick = files[Math.floor(Math.random() * files.length)];
+    if (_musicAudio) { _musicAudio.pause(); _musicAudio = null; }
+    const a = new Audio("/musics/" + encodeURIComponent(pick));
+    a.loop = true;
+    a.volume = 0.5;
+    _musicAudio = a;
+    a.play().then(() => { if (labelEl) labelEl.textContent = "♪ " + pick; }).catch(() => {
+      if (labelEl) labelEl.textContent = "autoplay blocked — click again";
+    });
+  }
+
+  /* ---- autoplay on open ---- */
+  function maybePlayMusicOnOpen() {
+    // Only when an admin is signed in (app view visible) and the toggle is on.
+    const enabled = localStorage.getItem("spider_music_on_open") === "1";
+    if (!enabled) return;
+    if (document.getElementById("app-view") && !document.getElementById("app-view").hidden) {
+      api("/settings/music/list").then((m) => playRandomMusic(m.files)).catch(() => {});
+    }
+  }
+
   /* ---------------- misc ---------------- */
   function copyText(text, msg) {
     navigator.clipboard.writeText(text).then(() => toast(msg || "Copied")).catch(() => toast("Copy failed", "err"));
@@ -515,6 +586,7 @@
         : `<span id="xray-status" class="pill off">Xray: STOPPED</span>`;
     } catch { /* ignore */ }
     showView("dashboard");
+    maybePlayMusicOnOpen();
   }
 
   function bindShell() {

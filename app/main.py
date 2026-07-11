@@ -14,7 +14,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import auth, dashboard, domains, inbounds, subscription, system, users
+from app.api import (
+    auth,
+    dashboard,
+    domains,
+    inbounds,
+    settings as settings_router,
+    subscription,
+    system,
+    users,
+)
 from app.bootstrap import (
     ensure_admin,
     ensure_default_domain,
@@ -65,7 +74,7 @@ app.add_middleware(
 )
 
 # API routers
-for r in (auth, users, dashboard, inbounds, domains, subscription, system):
+for r in (auth, users, dashboard, inbounds, domains, subscription, system, settings_router):
     app.include_router(r.router)
 
 
@@ -99,6 +108,11 @@ async def spa_fallback(full_path: str):
 # Mount static dir for assets (css/js/img)
 if os.path.isdir(_STATIC_DIR):
     app.mount("/assets", StaticFiles(directory=os.path.join(_STATIC_DIR, "assets")), name="assets")
+
+# Mount music dir (audio files played when the panel opens)
+_MUSICS_DIR = os.path.join(_STATIC_DIR, "musics")
+if os.path.isdir(_MUSICS_DIR):
+    app.mount("/musics", StaticFiles(directory=_MUSICS_DIR), name="musics")
 
 
 if __name__ == "__main__":

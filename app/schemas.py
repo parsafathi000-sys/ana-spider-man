@@ -94,6 +94,7 @@ class InboundCreate(BaseModel):
     tag: str = Field(min_length=1, max_length=64)
     name: str = ""
     port: int = Field(ge=1, le=65535)
+    external_port: int | None = None  # client-facing port (differs from `port` behind NAT/proxy)
     security: str = "reality"  # reality | tls | none
     network: str = "xhttp"  # xhttp | ws
     server_name: str = ""
@@ -114,6 +115,7 @@ class InboundCreate(BaseModel):
 class InboundUpdate(BaseModel):
     name: str | None = None
     port: int | None = Field(default=None, ge=1, le=65535)
+    external_port: int | None = Field(default=None, ge=1, le=65535)
     security: str | None = None
     network: str | None = None
     server_name: str | None = None
@@ -144,6 +146,7 @@ class InboundOut(BaseModel):
     name: str
     protocol: str
     port: int
+    external_port: int | None = None
     security: str
     network: str
     uuid: str

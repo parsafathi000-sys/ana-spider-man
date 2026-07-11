@@ -56,7 +56,12 @@ class Inbound(Base):
     tag: Mapped[str] = mapped_column(String(64), unique=True)  # e.g. "vless-reality"
     name: Mapped[str] = mapped_column(String(128), default="")
     protocol: Mapped[str] = mapped_column(String(32), default="vless")  # vless
-    port: Mapped[int] = mapped_column(Integer)
+    port: Mapped[int] = mapped_column(Integer)  # internal listen port (server binds this)
+    # External/reverse-proxy port the *client* should connect to. When set, the
+    # server keeps listening on `port` but subscription URIs use `external_port`.
+    # This supports e.g. Reality behind a VPS TCP proxy / NAT where the public
+    # port differs from the container's internal listening port.
+    external_port: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     security: Mapped[str] = mapped_column(String(32), default="reality")  # reality | tls | none
     network: Mapped[str] = mapped_column(String(32), default="xhttp")  # xhttp | ws | tcp
 
