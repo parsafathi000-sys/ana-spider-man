@@ -130,6 +130,22 @@ async def set_enabled(db: AsyncSession, user: User, enabled: bool) -> User:
     return user
 
 
+async def reset_traffic(db: AsyncSession, user: User) -> User:
+    """Zero out a user's used traffic counter."""
+    user.used_traffic_bytes = 0
+    user.updated_at = datetime.now(timezone.utc)
+    # re-enable if it was auto-disabled by the traffic cap
+    if user.traffic_limit_bytes and user.traffic_limit_bytes > 0:
+        user.enabled = True
+        if user.is_expired:
+            user.status = "expired"
+        else:
+            user.status = "active"
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
 # ---------------------------------------------------------------------------
 # Expiry / traffic maintenance
 # ---------------------------------------------------------------------------

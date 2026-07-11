@@ -74,12 +74,28 @@ async def domains_page(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.get("/system")
 async def system_page(request: Request, db: AsyncSession = Depends(get_db)):
-    return await _serve("system.html", request, db)
+    # Xray control lives on the Logs page (sidebar has no separate "System").
+    return await _serve("xray.html", request, db)
 
 
 @router.get("/settings")
 async def settings_page(request: Request, db: AsyncSession = Depends(get_db)):
     return await _serve("settings.html", request, db)
+
+
+@router.get("/subscription")
+async def subscription_page(request: Request, db: AsyncSession = Depends(get_db)):
+    return await _serve("subscription.html", request, db)
+
+
+@router.get("/statistics")
+async def statistics_page(request: Request, db: AsyncSession = Depends(get_db)):
+    return await _serve("statistics.html", request, db)
+
+
+@router.get("/about")
+async def about_page(request: Request, db: AsyncSession = Depends(get_db)):
+    return await _serve("about.html", request, db)
 
 
 @router.get("/news")

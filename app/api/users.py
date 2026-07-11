@@ -100,6 +100,14 @@ async def disable_user(user_id: int, db: AsyncSession = Depends(get_db)):
     return await service.set_enabled(db, u, False)
 
 
+@router.post("/{user_id}/reset-traffic", response_model=UserOut)
+async def reset_traffic(user_id: int, db: AsyncSession = Depends(get_db)):
+    u = await service.get_user(db, user_id)
+    if not u:
+        raise HTTPException(404, "User not found")
+    return await service.reset_traffic(db, u)
+
+
 @router.get("/{user_id}/sessions")
 async def user_sessions(user_id: int, db: AsyncSession = Depends(get_db)):
     u = await service.get_user(db, user_id)
