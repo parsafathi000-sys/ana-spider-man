@@ -183,8 +183,14 @@ body {
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--neon); box-shadow: 0 0 0 2px rgba(255,26,60,.22); }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
-/* ---------- modal ---------- */
-.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; z-index: 50; padding: 16px; }
+/* ---------- modal ----------
+   IMPORTANT: the `hidden` attribute must win. The UA rule `[hidden]{display:none}`
+   is overridden by author `display` rules, so we must gate the grid layout on
+   `:not([hidden])` and explicitly hide it when `[hidden]`. Otherwise the modal
+   (and its empty .glass card's neon box-shadow) stays painted over the page. */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 50; padding: 16px; }
+.modal-backdrop[hidden] { display: none; }
+.modal-backdrop:not([hidden]) { display: grid; place-items: center; }
 .modal { width: min(560px, 100%); max-height: 90vh; overflow: auto; padding: 22px; }
 .modal h3 { margin: 0 0 16px; letter-spacing: 2px; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
