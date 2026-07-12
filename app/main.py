@@ -14,7 +14,6 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSON
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api import (
     auth,
@@ -34,7 +33,7 @@ from app.bootstrap import (
     ensure_default_domain,
     ensure_default_inbound,
 )
-from app.core.auth_middleware import AuthMiddleware, set_auth_cookie, clear_auth_cookie
+from app.core.auth_middleware import AuthMiddleware
 from app.core.config import settings
 from app.core.logging import log
 from app.database import dispose_engine, get_sessionmaker, init_db
@@ -124,17 +123,22 @@ app.add_middleware(
 # carry an X-Requested-With: SpiderSPA header must also carry a valid-format
 # X-CSRF-Token. Plain API/test clients that omit both headers are unaffected.
 # This stops cross-site form/JS from issuing mutations without the SPA token.
-class CSRFTokenMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
+class CSRFTokenMiddleware:
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await app(scope, receive, send)
+            return
+        
+        request = Request(scope, receive)
         if request.method in ("POST", "PUT", "DELETE", "PATCH"):
             if request.headers.get("X-Requested-With") == "SpiderSPA":
                 token = request.headers.get("X-CSRF-Token", "")
                 if not (len(token) == 32 and all(c in "0123456789abcdef" for c in token)):
-                    return JSONResponse("CSRF token invalid", status_code=403)
-        return await call_next(request)
+                    response = JSONResponse("CSRF token invalid", status_code=403)
+                    await response(scope, receive, send)
+                    return
+        await app(scope, receive, send)
 
-
-app.add_middleware(CSRFTokenMiddleware)
 
 # Jinja2 templates
 templates = Jinja2Templates(directory="app/templates")

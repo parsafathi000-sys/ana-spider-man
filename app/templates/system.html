@@ -53,87 +53,88 @@
 
 {% block extra_scripts %}
 <script>
-  // System view renderer
-  async function renderSystem() {
-    try {
-      const s = await api('/system/info');
+// System view renderer
+async function renderSystem() {
+  try {
+    const sys = await api('/system');
+    const root = document.getElementById('content');
+    
+    root.innerHTML = `
+      <div class="grid cards">
+        <div class="card glass">
+          <div class="k">CPU</div>
+          <div class="v">${sys.cpu_percent == null ? '—' : sys.cpu_percent + '%'}</div>
+          <div class="sub">${sys.cpu_count} cores</div>
+        </div>
+        <div class="card glass">
+          <div class="k">RAM</div>
+          <div class="v">${sys.memory_percent == null ? '—' : sys.memory_percent + '%'}</div>
+          <div class="sub">${fmtBytes(sys.memory_used)} / ${fmtBytes(sys.memory_total)}</div>
+        </div>
+        <div class="card glass">
+          <div class="k">Storage</div>
+          <div class="v">${sys.disk_percent == null ? '—' : sys.disk_percent + '%'}</div>
+          <div class="sub">${fmtBytes(sys.disk_used)} / ${fmtBytes(sys.disk_total)}</div>
+        </div>
+        <div class="card glass">
+          <div class="k">Uptime</div>
+          <div class="v" style="font-size:18px">${sys.uptime_human || '—'}</div>
+          <div class="sub">since ${sys.boot_time || '—'}</div>
+        </div>
+      </div>
       
-      const html = `
-        <div class="panel glass">
-          <h3>SYSTEM INFORMATION</h3>
-          <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
-            <div><div class="k">Hostname</div><div class="v" style="font-size:16px">${esc(s.hostname || '—')}</div></div>
-            <div><div class="k">Platform</div><div class="v" style="font-size:16px">${esc(s.platform || '—')}</div></div>
-            <div><div class="k">Python</div><div class="v" style="font-size:16px">${esc(s.python_version || '—')}</div></div>
-            <div><div class="k">Architecture</div><div class="v" style="font-size:16px">${esc(s.arch || '—')}</div></div>
-          </div>
+      <div class="panel glass" style="margin-top:16px">
+        <h3>XRAY PROCESS</h3>
+        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+          <div><div class="k">Status</div><div class="v" style="font-size:20px">${sys.xray_running ? '🟢 Running' : '🔴 Stopped'}</div></div>
+          <div><div class="k">PID</div><div class="v" style="font-size:20px">${sys.xray_pid || '—'}</div></div>
+          <div><div class="k">Version</div><div class="v" style="font-size:20px">${esc(sys.xray_version || '—')}</div></div>
+          <div><div class="k">Config</div><div class="v" style="font-size:13px;color:var(--txt-dim)">${esc(sys.xray_config_path || '—')}</div></div>
         </div>
-        
-        <div class="panel glass" style="margin-top:16px">
-          <h3>RESOURCE USAGE</h3>
-          <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
-            <div><div class="k">CPU</div><div class="v" style="font-size:24px">${s.cpu_percent != null ? s.cpu_percent.toFixed(1) + '%' : '—'}</div></div>
-            <div><div class="k">Memory</div><div class="v" style="font-size:24px">${s.memory_percent != null ? s.memory_percent.toFixed(1) + '%' : '—'}</div></div>
-            <div><div class="k">Memory Used</div><div class="v" style="font-size:16px">${s.memory_used ? fmtBytes(s.memory_used) : '—'}</div></div>
-            <div><div class="k">Memory Total</div><div class="v" style="font-size:16px">${s.memory_total ? fmtBytes(s.memory_total) : '—'}</div></div>
-          </div>
+        <div class="row-actions" style="margin-top:16px">
+          <button class="btn btn-sm" data-act="restart">⟳ Restart Xray</button>
+          <button class="btn btn-sm" data-act="reload">⚡ Reload Config</button>
+          <button class="btn btn-sm" data-act="validate">✓ Validate Config</button>
+          <button class="btn btn-sm" data-act="logs">📜 View Logs</button>
         </div>
-        
-        <div class="panel glass" style="margin-top:16px">
-          <h3>DISK USAGE</h3>
-          <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
-            <div><div class="k">Total</div><div class="v" style="font-size:16px">${s.disk_total ? fmtBytes(s.disk_total) : '—'}</div></div>
-            <div><div class="k">Used</div><div class="v" style="font-size:16px">${s.disk_used ? fmtBytes(s.disk_used) : '—'}</div></div>
-            <div><div class="k">Free</div><div class="v" style="font-size:16px">${s.disk_free ? fmtBytes(s.disk_free) : '—'}</div></div>
-            <div><div class="k">Usage</div><div class="v" style="font-size:16px">${s.disk_percent != null ? s.disk_percent.toFixed(1) + '%' : '—'}</div></div>
-          </div>
-        </div>
-        
-        <div class="panel glass" style="margin-top:16px">
-          <h3>XRAY PROCESS</h3>
-          <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
-            <div><div class="k">Status</div><div class="v" style="font-size:18px">${s.xray_running ? '🟢 Running' : '🔴 Stopped'}</div></div>
-            <div><div class="k">PID</div><div class="v" style="font-size:18px">${s.xray_pid || '—'}</div></div>
-            <div><div class="k">Binary</div><div class="v" style="font-size:14px">${esc(s.xray_binary || '—')}</div></div>
-            <div><div class="k">Version</div><div class="v" style="font-size:14px">${esc(s.xray_version || '—')}</div></div>
-            <div><div class="k">Config</div><div class="v" style="font-size:12px">${esc(s.xray_config || '—')}</div></div>
-            <div><div class="k">Uptime</div><div class="v" style="font-size:16px">${s.xray_uptime || '—'}</div></div>
-          </div>
-          <div class="row-actions" style="margin-top:16px">
-            <button class="btn btn-sm" data-act="restart">⟳ Restart Xray</button>
-            <button class="btn btn-sm" data-act="reload">⚡ Reload Config</button>
-            <button class="btn btn-sm" data-act="validate">✓ Validate Config</button>
-          </div>
-          <div id="sys-validate-out" class="muted" style="font-size:12px;margin-top:10px;white-space:pre-wrap"></div>
-        </div>
-      `;
+        <div id="sys-validate-out" class="muted" style="font-size:12px;margin-top:10px;white-space:pre-wrap"></div>
+      </div>
       
-      document.getElementById('content').innerHTML = html;
-      
-      // Bind buttons
-      document.querySelector('[data-act="restart"]').onclick = async () => {
-        try { await api('/system/restart', { method: 'POST' }); toast('Restarting Xray...'); setTimeout(renderSystem, 3000); }
-        catch (e) { toast(e.message, 'err'); }
-      };
-      document.querySelector('[data-act="reload"]').onclick = async () => {
-        try { await api('/system/reload', { method: 'POST' }); toast('Config reloaded'); renderSystem(); }
-        catch (e) { toast(e.message, 'err'); }
-      };
-      document.querySelector('[data-act="validate"]').onclick = async () => {
-        const out = document.getElementById('sys-validate-out');
-        out.textContent = 'Validating…';
-        try {
-          const r = await api('/xray/validate', { method: 'POST' });
-          out.className = r.ok ? 'ok' : 'error-text';
-          out.style.whiteSpace = 'pre-wrap';
-          out.textContent = r.ok ? '✓ Config valid: ' + (r.message || '') : '✗ ' + (r.message || '') + '\n' + (r.stderr || '');
-        } catch (e) { out.className = 'error-text'; out.textContent = e.message; }
-      };
-    } catch (e) {
-      document.getElementById('content').innerHTML = `<div class="panel glass"><p class="error-text">${e.message}</p></div>`;
-    }
+      <div class="panel glass" style="margin-top:16px">
+        <h3>ENVIRONMENT</h3>
+        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));font-size:12px">
+          ${Object.entries(sys.env || {}).map(([k, v]) => `
+            <div><strong>${esc(k)}</strong><br><span style="color:var(--txt-dim)">${esc(String(v))}</span></div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+    
+    // Bind buttons
+    document.querySelector('[data-act="restart"]').onclick = async () => {
+      try { await api('/system/restart', { method: 'POST' }); toast('Restarting...'); setTimeout(renderSystem, 3000); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+    document.querySelector('[data-act="reload"]').onclick = async () => {
+      try { await api('/system/reload', { method: 'POST' }); toast('Config reloaded'); renderSystem(); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+    document.querySelector('[data-act="validate"]').onclick = async () => {
+      const out = document.getElementById('sys-validate-out');
+      out.textContent = 'Validating…';
+      try {
+        const r = await api('/xray/validate', { method: 'POST' });
+        out.className = r.ok ? 'ok' : 'error-text';
+        out.textContent = r.ok ? '✓ Config valid: ' + (r.message || '') : '✗ ' + (r.message || '') + '\n' + (r.stderr || '');
+      } catch (e) { out.className = 'error-text'; out.textContent = e.message; }
+    };
+    document.querySelector('[data-act="logs"]').onclick = () => showView('logs');
+    
+  } catch (e) {
+    document.getElementById('content').innerHTML = `<div class="panel glass"><p class="error-text">${e.message}</p></div>`;
   }
+}
 
-  window.initSystem = renderSystem;
+window.initSystem = renderSystem;
 </script>
 {% endblock %}

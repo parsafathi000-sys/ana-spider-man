@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 from typing import Optional
+from datetime import datetime, timezone
+
 from fastapi import Request, Response
+from fastapi.responses import RedirectResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import RedirectResponse
 
 from app.core.security import decode_access_token, get_current_admin
 from app.database import get_sessionmaker
+from app.users.models import AdminUser
+from sqlalchemy import select
 
 
 # Routes that don't require authentication
@@ -34,32 +38,31 @@ def is_public_path(path: str) -> bool:
 
 class AuthMiddleware(BaseHTTPMiddleware):
     """Middleware to check authentication via HttpOnly cookie or Bearer token."""
-    
+
     async def dispatch(self, request: Request, call_next):
         # Skip authentication for public paths
         if is_public_path(request.url.path):
             return await call_next(request)
-        
+
         # Try to get token from HttpOnly cookie first
         token = request.cookies.get("spider_token")
-        
+
         # Fallback to Authorization header for API clients
         if not token:
             auth_header = request.headers.get("Authorization")
             if auth_header and auth_header.startswith("Bearer "):
                 token = auth_header[7:]
-        
+
         if not token:
             # Redirect to login for browser requests
             if "text/html" in request.headers.get("accept", ""):
                 return RedirectResponse(url="/login", status_code=302)
             # Return 401 for API requests
-            from fastapi.responses import JSONResponse
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Not authenticated"}
             )
-        
+
         # Validate token
         payload = decode_access_token(token)
         if not payload or "sub" not in payload:
@@ -68,13 +71,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 status_code=401,
                 content={"detail": "Invalid or expired token"}
             )
-            response.delete_cookie("spider_token", httponly=True, secure=True, samesite="lax")
+            response.delete_cookie(
+                key="spider_token",
+                httponly=True,
+                secure=True,
+                samesite="lax",
+                path="/"
+            )
             return response
-        
+
         # Attach user info to request state
         request.state.user = payload["sub"]
         request.state.token = token
-        
+
         return await call_next(request)
 
 

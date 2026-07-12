@@ -53,107 +53,168 @@
 
 {% block extra_scripts %}
 <script>
-  // Settings view renderer
-  async function renderSettings() {
-    try {
-      const s = await api('/settings');
-      
-      const html = `
-        <div class="panel glass">
-          <h3>PANEL SETTINGS</h3>
-          <div class="setting-row">
-            <div class="k">Auto-restart Xray on crash</div>
-            <label class="switch"><input type="checkbox" id="set-autorst" ${s.auto_restart ? 'checked' : ''}><span class="slider"></span></label>
+// Settings view renderer
+async function renderSettings() {
+  try {
+    const settings = await api('/settings');
+    const root = document.getElementById('content');
+    
+    root.innerHTML = `
+      <div class="panel glass">
+        <h3>PANEL SETTINGS</h3>
+        <div class="setting-row">
+          <div>
+            <div class="k">Admin Username</div>
+            <div class="sub">Current: ${esc(settings.admin_username)}</div>
           </div>
-          <div class="setting-row">
-            <div class="k">Panel title</div>
-            <div><input class="field" id="set-title" value="${esc(s.panel_title || 'Spider Panel')}" style="max-width:300px"></div>
-          </div>
-          <div class="setting-row">
-            <div class="k">Log level</div>
-            <div>
-              <select class="field" id="set-loglevel" style="max-width:200px">
-                <option value="DEBUG" ${s.log_level === 'DEBUG' ? 'selected' : ''}>DEBUG</option>
-                <option value="INFO" ${s.log_level === 'INFO' ? 'selected' : ''}>INFO</option>
-                <option value="WARNING" ${s.log_level === 'WARNING' ? 'selected' : ''}>WARNING</option>
-                <option value="ERROR" ${s.log_level === 'ERROR' ? 'selected' : ''}>ERROR</option>
-              </select>
-            </div>
-          </div>
-          <div class="setting-row">
-            <div class="k">Session timeout (minutes)</div>
-            <div><input class="field" id="set-session-timeout" type="number" value="${s.session_timeout_minutes || 1440}" style="max-width:100px"></div>
+          <div class="row-actions">
+            <button class="btn btn-sm" data-act="change-user">Change</button>
           </div>
         </div>
-        
-        <div class="panel glass" style="margin-top:16px">
-          <h3>CHANGE CREDENTIALS</h3>
-          <form id="cred-form" class="auth-form" style="max-width:400px">
-            <label>Current Password<input type="password" name="current_password" required></label>
-            <label>New Username<input type="text" name="new_username" placeholder="Leave empty to keep current"></label>
-            <label>New Password<input type="password" name="new_password" placeholder="Leave empty to keep current"></label>
-            <button type="submit" class="btn btn-primary neon">Save Changes</button>
-          </form>
+        <div class="setting-row">
+          <div>
+            <div class="k">Admin Password</div>
+            <div class="sub">********</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm" data-act="change-pass">Change</button>
+          </div>
         </div>
-        
-        <div class="panel glass" style="margin-top:16px">
-          <h3>XRAY SETTINGS</h3>
-          <div class="setting-row">
+        <div class="setting-row">
+          <div>
             <div class="k">Xray Binary Path</div>
-            <div><input class="field" id="set-xray-bin" value="${esc(s.xray_binary_path || '/usr/local/bin/xray')}" style="max-width:400px"></div>
-          </div>
-          <div class="setting-row">
-            <div class="k">Xray Config Path</div>
-            <div><input class="field" id="set-xray-cfg" value="${esc(s.xray_config_path || '')}" style="max-width:400px"></div>
-          </div>
-          <div class="setting-row">
-            <div class="k">Internal Port</div>
-            <div><input class="field" id="set-xray-port" type="number" value="${s.xray_inbound_port || 24567}" style="max-width:100px"></div>
+            <div class="sub">${esc(settings.xray_binary_path)}</div>
           </div>
         </div>
-      `;
+        <div class="setting-row">
+          <div>
+            <div class="k">Data Directory</div>
+            <div class="sub">${esc(settings.data_dir)}</div>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="k">Database URL</div>
+            <div class="sub">${esc(settings.database_url)}</div>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="k">Active Domain</div>
+            <div class="sub">${esc(settings.active_domain || 'none')}</div>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="k">Xray Inbound Port</div>
+            <div class="sub">${settings.xray_inbound_port}</div>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="k">Panel Port</div>
+            <div class="sub">${settings.panel_port}</div>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="k">Railway TCP Proxy Port</div>
+            <div class="sub">${settings.railway_tcp_proxy_port || 'not configured'}</div>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="k">Railway TCP Proxy Domain</div>
+            <div class="sub">${esc(settings.railway_tcp_proxy_domain || 'not configured')}</div>
+          </div>
+        </div>
+        <div class="setting-row">
+          <label class="switch">
+            <input type="checkbox" id="auto-restart" ${settings.auto_restart ? 'checked' : ''}>
+            <span class="slider"></span>
+          </label>
+          <span class="k">Xray Auto Restart</span>
+        </div>
+      </div>
       
-      document.getElementById('content').innerHTML = html;
-      
-      // Save settings
-      document.getElementById('set-autorst').onchange = saveSettings;
-      document.getElementById('set-title').onchange = saveSettings;
-      document.getElementById('set-loglevel').onchange = saveSettings;
-      document.getElementById('set-session-timeout').onchange = saveSettings;
-      document.getElementById('set-xray-bin').onchange = saveSettings;
-      document.getElementById('set-xray-cfg').onchange = saveSettings;
-      document.getElementById('set-xray-port').onchange = saveSettings;
-      
-      document.getElementById('cred-form').onsubmit = async (e) => {
-        e.preventDefault();
-        const f = Object.fromEntries(new FormData(e.target).entries());
-        try {
-          await api('/auth/change-credentials', { method: 'POST', body: f });
-          toast('Credentials updated');
-          e.target.reset();
-        } catch (e) { toast(e.message, 'err'); }
-      };
-      
-      async function saveSettings() {
-        const payload = {
-          auto_restart: document.getElementById('set-autorst').checked,
-          panel_title: document.getElementById('set-title').value,
-          log_level: document.getElementById('set-loglevel').value,
-          session_timeout_minutes: Number(document.getElementById('set-session-timeout').value),
-          xray_binary_path: document.getElementById('set-xray-bin').value,
-          xray_config_path: document.getElementById('set-xray-cfg').value,
-          xray_inbound_port: Number(document.getElementById('set-xray-port').value),
-        };
-        try {
-          await api('/settings', { method: 'PUT', body: payload });
-          toast('Settings saved');
-        } catch (e) { toast(e.message, 'err'); }
-      }
-    } catch (e) {
-      document.getElementById('content').innerHTML = `<div class="panel glass"><p class="error-text">${e.message}</p></div>`;
-    }
+      <div class="panel glass" style="margin-top:16px">
+        <h3>DANGER ZONE</h3>
+        <div class="setting-row">
+          <div>
+            <div class="k">Reset Database</div>
+            <div class="sub">This will delete ALL users and reinitialize the database and create admin/admin</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm danger" data-act="reset-db">Reset</button>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    document.getElementById('change-user').onclick = () => changeCredModal('username');
+    document.getElementById('change-pass').onclick = () => changeCredModal('password');
+    
+    document.getElementById('auto-restart').onchange = async (e) => {
+      try {
+        await api('/settings/auto-restart', { method: 'PUT', body: { enabled: e.target.checked } });
+        toast('Auto-restart ' + (e.target.checked ? 'enabled' : 'disabled'));
+      } catch (e) { toast(e.message, 'err'); renderSettings(); }
+    };
+    
+    document.querySelector('[data-act="reset-db"]').onclick = async () => {
+      if (!confirm('This will DELETE ALL DATA. Type RESET to confirm:')) return;
+      const input = prompt('Type RESET to confirm:');
+      if (input !== 'RESET') return;
+      try {
+        await api('/system/reset-db', { method: 'POST' });
+        toast('Database reset, reloading...');
+        setTimeout(() => window.location.reload(), 2000);
+      } catch (e) { toast(e.message, 'err'); }
+    };
+    
+  } catch (e) {
+    document.getElementById('content').innerHTML = `<div class="panel glass"><p class="error-text">${e.message}</p></div>`;
   }
+}
 
-  window.initSettings = renderSettings;
+function changeCredModal(type) {
+  const modal = document.getElementById('modal');
+  const card = document.getElementById('modal-card');
+  
+  card.innerHTML = `
+    <h3>Change ${type === 'username' ? 'Username' : 'Password'}</h3>
+    <form id="cred-form" style="display:flex;flex-direction:column;gap:12px">
+      <div class="field">
+        <label>Current Password<input type="password" name="current_password" required></label>
+      </div>
+      ${type === 'username' ? '<div class="field"><label>New Username<input type="text" name="new_username" required autocomplete="username"></label></div>' : ''}
+      ${type === 'password' ? '<div class="field"><label>New Password<input type="password" name="new_password" required autocomplete="new-password" minlength="6"></label></div>' : ''}
+      <div class="modal-actions">
+        <button type="button" class="btn modal-close">Cancel</button>
+        <button type="submit" class="btn btn-primary neon">Change</button>
+      </div>
+    </form>
+  `;
+  
+  modal.hidden = false;
+  
+  modal.querySelector('.modal-close').onclick = () => { modal.hidden = true; };
+  
+  document.getElementById('cred-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      await api('/auth/change-credentials', { 
+        method: 'POST', 
+        body: Object.fromEntries(fd) 
+      });
+      toast('Credentials updated, logging out...');
+      modal.hidden = true;
+      setTimeout(() => logout(), 1500);
+    } catch (e) { toast(e.message, 'err'); }
+  };
+}
+
+window.initSettings = renderSettings;
 </script>
 {% endblock %}

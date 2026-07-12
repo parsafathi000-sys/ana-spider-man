@@ -2,8 +2,8 @@
 {% block title %}Login - Spider Panel{% endblock %}
 
 {% block content %}
-<!-- ===================== LOGIN ===================== -->
-<section id="login-view" class="auth-wrap">
+<!-- Login Page - Standalone, no sidebar, no navigation -->
+<main class="auth-wrap safe-top safe-bottom">
   <div class="auth-card glass">
     <div class="brand">
       <div class="spider-logo" aria-hidden="true">
@@ -26,11 +26,11 @@
       <label>Password
         <input id="login-password" type="password" autocomplete="current-password" required />
       </label>
-      <button type="submit" class="btn btn-primary neon">ENTER</button>
+      <button type="submit" class="btn btn-primary neon btn-min">ENTER</button>
       <p id="login-error" class="error-text" hidden></p>
     </form>
   </div>
-</section>
+</main>
 {% endblock %}
 
 {% block extra_scripts %}

@@ -6,7 +6,7 @@ client URIs always match the running server config.
 
 Pipeline:
     Database -> Xray Builder -> config.json -> (xray loads it)
-                                       -> Subscription Builder reads Inbound rows too
+                                      -> Subscription Builder reads Inbound rows too
 """
 from __future__ import annotations
 
@@ -90,7 +90,8 @@ async def build_config(db: AsyncSession) -> dict[str, Any]:
 
     # Check for geo files
     geoip_exists, geosite_exists = _get_geo_files_exist()
-    
+    log.info(f"Geo files check: geoip.dat={'found' if geoip_exists else 'MISSING'}, geosite.dat={'found' if geosite_exists else 'MISSING'}")
+
     inbounds_cfg: list[dict[str, Any]] = []
     for ib in inbounds:
         # Per-inbound domain wins; else the global active domain; else localhost.
@@ -229,7 +230,7 @@ def validate_config_on_disk(path: str | None = None) -> tuple[bool, str]:
 
     try:
         proc = subprocess.run(
-            [binary, "-test", "-config", path],
+            [binary, "run", "-test", "-config", path],
             capture_output=True,
             text=True,
             timeout=20,

@@ -53,83 +53,83 @@
 
 {% block extra_scripts %}
 <script>
-  // Xray Logs view renderer
-  async function renderLogs() {
-    try {
-      const last = await api('/xray/last-result').catch(() => ({}));
-      const root = document.getElementById('content');
-      
-      root.innerHTML = `
-        <div class="panel glass">
-          <div class="panel-head">
-            <h3>XRAY LOGS</h3>
-            <span class="spacer"></span>
-            <button class="btn btn-sm" id="logs-pause"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pause</button>
-            <button class="btn btn-sm" id="logs-clear"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Clear</button>
-            <button class="btn btn-sm" id="logs-copy"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy</button>
-            <input type="text" id="logs-search" class="field" style="margin:0;max-width:200px;padding:6px 10px" placeholder="Search logs…">
-          </div>
-          <p class="muted" style="font-size:12px">Live tail of xray stdout/stderr. If Xray failed to start, the exact parser error appears here.</p>
-          ${last && last.error ? `<div class="error-text" style="white-space:pre-wrap;font-size:12px;margin-bottom:10px">${esc(last.error)}</div>` : ''}
-          <pre id="logs-box" class="codebox" style="min-height:50vh;max-height:70vh;overflow:auto;font-size:11px;background:#0a0008;border:1px solid var(--glass-brd);border-radius:10px;padding:12px;color:var(--neon-soft);font-family:'JetBrains Mono',monospace"></pre>
+// Xray Logs view renderer
+async function renderLogs() {
+  try {
+    const last = await api('/xray/last-result').catch(() => ({}));
+    const root = document.getElementById('content');
+    
+    root.innerHTML = `
+      <div class="panel glass">
+        <div class="panel-head">
+          <h3>XRAY LOGS</h3>
+          <span class="spacer"></span>
+          <button class="btn btn-sm" id="logs-pause"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pause</button>
+          <button class="btn btn-sm" id="logs-clear"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Clear</button>
+          <button class="btn btn-sm" id="logs-copy"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy</button>
+          <input type="text" id="logs-search" class="field" style="margin:0;max-width:200px;padding:6px 10px" placeholder="Search logs…">
         </div>
-      `;
-      
-      const box = root.querySelector('#logs-box');
-      let paused = false;
-      let ws = null;
-      const token = localStorage.getItem('spider_token');
-      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      
-      function connect() {
-        ws = new WebSocket(`${proto}//${location.host}/api/xray/logs/stream?token=${encodeURIComponent(token)}`);
-        ws.onmessage = (e) => { 
-          if (!paused) { 
-            box.textContent += e.data + '\n'; 
-            box.scrollTop = box.scrollHeight; 
-          } 
-        };
-        ws.onclose = () => { if (!paused) setTimeout(connect, 2000); };
-        ws.onerror = () => { try { ws.close(); } catch {} };
-      }
-      connect();
-      
-      root.querySelector('#logs-pause').onclick = () => { 
-        paused = !paused; 
-        root.querySelector('#logs-pause').innerHTML = paused 
-          ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Resume' 
-          : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pause'; 
+        <p class="muted" style="font-size:12px">Live tail of xray stdout/stderr. If Xray failed to start, the exact parser error appears here.</p>
+        ${last && last.error ? `<div class="error-text" style="white-space:pre-wrap;font-size:12px;margin-bottom:10px">${esc(last.error)}</div>` : ''}
+        <pre id="logs-box" class="codebox" style="min-height:50vh;max-height:70vh;overflow:auto;font-size:11px;background:#0a0008;border:1px solid var(--glass-brd);border-radius:10px;padding:12px;color:var(--neon-soft);font-family:'JetBrains Mono',monospace"></pre>
+      </div>
+    `;
+    
+    const box = root.querySelector('#logs-box');
+    let paused = false;
+    let ws = null;
+    const token = localStorage.getItem('spider_token');
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    
+    function connect() {
+      ws = new WebSocket(`${proto}//${location.host}/api/xray/logs/stream?token=${encodeURIComponent(token)}`);
+      ws.onmessage = (e) => { 
+        if (!paused) { 
+          box.textContent += e.data + '\n'; 
+          box.scrollTop = box.scrollHeight; 
+        } 
       };
-      
-      root.querySelector('#logs-clear').onclick = () => { box.textContent = ''; };
-      
-      root.querySelector('#logs-copy').onclick = () => { 
-        navigator.clipboard.writeText(box.textContent).then(() => toast('Logs copied')).catch(() => toast('Failed to copy', 'err')); 
-      };
-      
-      // Search filter
-      root.querySelector('#logs-search').oninput = (e) => {
-        const query = e.target.value.toLowerCase();
-        const lines = box.textContent.split('\n');
-        if (!query) {
-          box.textContent = lines.join('\n');
-          return;
-        }
-        const filtered = lines.filter(l => l.toLowerCase().includes(query));
-        box.textContent = filtered.join('\n');
-      };
-      
-      // fetch backlog
-      api('/xray/logs?limit=400').then(d => { 
-        box.textContent = (d.lines || []).join('\n'); 
-        box.scrollTop = box.scrollHeight; 
-      }).catch(() => {});
-      
-    } catch (e) {
-      document.getElementById('content').innerHTML = `<div class="panel glass"><p class="error-text">${e.message}</p></div>`;
+      ws.onclose = () => { if (!paused) setTimeout(connect, 2000); };
+      ws.onerror = () => { try { ws.close(); } catch {} };
     }
+    connect();
+    
+    root.querySelector('#logs-pause').onclick = () => { 
+      paused = !paused; 
+      root.querySelector('#logs-pause').innerHTML = paused 
+        ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Resume' 
+        : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pause'; 
+    };
+    
+    root.querySelector('#logs-clear').onclick = () => { box.textContent = ''; };
+    
+    root.querySelector('#logs-copy').onclick = () => { 
+      navigator.clipboard.writeText(box.textContent).then(() => toast('Logs copied')).catch(() => toast('Failed to copy', 'err')); 
+    };
+    
+    // Search filter
+    root.querySelector('#logs-search').oninput = (e) => {
+      const query = e.target.value.toLowerCase();
+      const lines = box.textContent.split('\n');
+      if (!query) {
+        box.textContent = lines.join('\n');
+        return;
+      }
+      const filtered = lines.filter(l => l.toLowerCase().includes(query));
+      box.textContent = filtered.join('\n');
+    };
+    
+    // fetch backlog
+    api('/xray/logs?limit=400').then(d => { 
+      box.textContent = (d.lines || []).join('\n'); 
+      box.scrollTop = box.scrollHeight; 
+    }).catch(() => {});
+    
+  } catch (e) {
+    document.getElementById('content').innerHTML = `<div class="panel glass"><p class="error-text">${e.message}</p></div>`;
   }
+}
 
-  window.initLogs = renderLogs;
+window.initLogs = renderLogs;
 </script>
 {% endblock %}

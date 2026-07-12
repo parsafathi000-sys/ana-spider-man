@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import secrets
 from pathlib import Path
+from typing import Any
 
 from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -147,7 +148,8 @@ class Settings(BaseSettings):
         """Port used in client (subscription) links — the EXTERNALLY
         reachable Railway TCP proxy port. NEVER the internal Xray port and
         NEVER the FastAPI web port. Falls back to internal_xray_port only
-        when no TCP proxy is configured (local/dev)."""
+        when no TCP proxy is configured (local/dev).
+        """
         if self.RAILWAY_TCP_PROXY_PORT:
             try:
                 return int(self.RAILWAY_TCP_PROXY_PORT)
