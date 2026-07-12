@@ -162,7 +162,7 @@ async def login_page(request: Request):
         payload = decode_access_token(token)
         if payload and "sub" in payload:
             return RedirectResponse(url="/dashboard", status_code=302)
-    return templates.TemplateResponse("login.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="login.html", context={})
 
 
 @app.get("/logout")
@@ -203,50 +203,50 @@ async def require_auth(request: Request) -> str:
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page(request: Request, user: str = Depends(require_auth)):
     """Dashboard page - requires authentication."""
-    return templates.TemplateResponse("dashboard.html", {"request": request, "user": user})
+    return templates.TemplateResponse(request=request, name="dashboard.html", context={"user": user})
 
 
 @app.get("/users", response_class=HTMLResponse)
 async def users_page(request: Request, user: str = Depends(require_auth)):
     """Users page - requires authentication."""
-    return templates.TemplateResponse("users.html", {"request": request, "user": user})
+    return templates.TemplateResponse(request=request, name="users.html", context={"user": user})
 
 
 @app.get("/inbounds", response_class=HTMLResponse)
 async def inbounds_page(request: Request, user: str = Depends(require_auth)):
     """Inbounds page - requires authentication."""
-    return templates.TemplateResponse("inbounds.html", {"request": request, "user": user})
+    return templates.TemplateResponse(request=request, name="inbounds.html", context={"user": user})
 
 
 @app.get("/domains", response_class=HTMLResponse)
 async def domains_page(request: Request, user: str = Depends(require_auth)):
     """Domains page - requires authentication."""
-    return templates.TemplateResponse("domains.html", {"request": request, "user": user})
+    return templates.TemplateResponse(request=request, name="domains.html", context={"user": user})
 
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, user: str = Depends(require_auth)):
     """Settings page - requires authentication."""
-    return templates.TemplateResponse("settings.html", {"request": request, "user": user})
+    return templates.TemplateResponse(request=request, name="settings.html", context={"user": user})
 
 
 @app.get("/system", response_class=HTMLResponse)
 async def system_page(request: Request, user: str = Depends(require_auth)):
     """System page - requires authentication."""
-    return templates.TemplateResponse("system.html", {"request": request, "user": user})
+    return templates.TemplateResponse(request=request, name="system.html", context={"user": user})
 
 
 @app.get("/xray", response_class=HTMLResponse)
 async def xray_logs_page(request: Request, user: str = Depends(require_auth)):
     """Xray logs page - requires authentication."""
-    return templates.TemplateResponse("xray.html", {"request": request, "user": user})
+    return templates.TemplateResponse(request=request, name="xray.html", context={"user": user})
 
 
 @app.get("/sub", response_class=HTMLResponse)
 async def sub_landing(request: Request):
     """Public subscription UI landing page (enter a UUID, or open /sub/<uuid>)."""
     # This is a public page, no auth required
-    return templates.TemplateResponse("sub.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="sub.html", context={})
 
 
 # Health check

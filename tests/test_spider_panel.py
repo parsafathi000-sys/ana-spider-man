@@ -77,6 +77,68 @@ async def session(tmp_db):
 
 
 # ---------------------------------------------------------------------------
+# Tests: template rendering (regression for unhashable type: 'dict')
+# ---------------------------------------------------------------------------
+def test_login_page_renders(tmp_db):
+    """GET /login must render 200, not 500 (Starlette 1.x TemplateResponse)."""
+    from app.main import app
+    from app.bootstrap import ensure_admin
+    import asyncio
+
+    async def _seed():
+        await init_db()
+        maker = get_sessionmaker()
+        async with maker() as s:
+            await ensure_admin(s)
+
+    asyncio.run(_seed())
+    c = TestClient(app)
+    r = c.get("/login")
+    assert r.status_code == 200
+    assert "text/html" in r.headers.get("content-type", "")
+    assert "Login - Spider Panel" in r.text
+
+
+def test_authenticated_pages_render(tmp_db):
+    """Every authenticated TemplateResponse route renders 200 with a valid token."""
+    from app.main import app
+    from app.bootstrap import ensure_admin
+    import asyncio
+
+    async def _seed():
+        await init_db()
+        maker = get_sessionmaker()
+        async with maker() as s:
+            await ensure_admin(s)
+
+    asyncio.run(_seed())
+    c = TestClient(app)
+    tok = c.post(
+        "/api/auth/token",
+        data={"username": "admin", "password": "testpass123"},
+    ).json()["access_token"]
+    # The SPA stores the token in the spider_token cookie; require_auth reads the
+    # cookie (AuthMiddleware validates it). Bearer header alone is not enough for
+    # the page routes, so authenticate via the cookie like a real browser does.
+    c.cookies.set("spider_token", tok)
+    h = {"Accept": "text/html"}
+    for path, marker in (
+        ("/dashboard", "Dashboard"),
+        ("/users", "Users"),
+        ("/inbounds", "Inbounds"),
+        ("/domains", "Domains"),
+        ("/settings", "Settings"),
+        ("/system", "System"),
+        ("/xray", "Xray"),
+        ("/sub", "Spider"),
+    ):
+        r = c.get(path, headers=h, follow_redirects=False)
+        assert r.status_code == 200, f"{path} -> {r.status_code}"
+        assert marker in r.text, f"{path} did not render {marker}"
+
+
+
+# ---------------------------------------------------------------------------
 # Tests: security / reality
 # ---------------------------------------------------------------------------
 def test_uuid_format():
