@@ -35,27 +35,58 @@
 
 {% block extra_scripts %}
 <script>
-  // Login form handler
-  document.getElementById('login-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const username = document.getElementById('login-username').value;
-    const password = document.getElementById('login-password').value;
-    const errorEl = document.getElementById('login-error');
-    
-    try {
-      const data = await api('/auth/token', { 
-        method: 'POST', 
-        form: { username, password } 
-      });
-      TOKEN = data.access_token;
-      ME = data.username;
-      localStorage.setItem('spider_token', TOKEN);
-      localStorage.setItem('spider_user', ME);
-      window.location.href = '/dashboard';
-    } catch (e) {
-      errorEl.textContent = e.message;
+  // Self-contained login handler. Uses native fetch only — it must NOT depend
+  // on SPA globals (api/TOKEN/ME) because app.js is not loaded on this page,
+  // and the base.html inline block can abort before defining window.api.
+  (function () {
+    "use strict";
+    var form = document.getElementById("login-form");
+    var errorEl = document.getElementById("login-error");
+    if (!form) return;
+
+    function showError(msg) {
+      errorEl.textContent = msg || "Login failed. Please try again.";
       errorEl.hidden = false;
     }
-  });
+
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      errorEl.hidden = true;
+      var username = document.getElementById("login-username").value;
+      var password = document.getElementById("login-password").value;
+      var btn = form.querySelector("button[type=submit]");
+      if (btn) { btn.disabled = true; btn.textContent = "…"; }
+
+      try {
+        var res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: username, password: password }),
+        });
+
+        var data = null;
+        try { data = await res.json(); } catch (_) { /* non-JSON body */ }
+
+        if (!res.ok) {
+          var msg = (data && (data.detail || data.error)) ||
+                    ("HTTP " + res.status);
+          showError(typeof msg === "string" ? msg : JSON.stringify(msg));
+          return;
+        }
+
+        // Success: store JWT + username, then go to the dashboard.
+        if (data && data.access_token) {
+          localStorage.setItem("spider_token", data.access_token);
+          localStorage.setItem("spider_user", data.username || username);
+        }
+        window.location.href = "/dashboard";
+      } catch (err) {
+        // Network error or unexpected failure — never leak raw JS errors.
+        showError("Cannot reach the server. Check your connection and try again.");
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "ENTER"; }
+      }
+    });
+  })();
 </script>
 {% endblock %}

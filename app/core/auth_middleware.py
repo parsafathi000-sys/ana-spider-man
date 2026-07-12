@@ -20,6 +20,7 @@ PUBLIC_PATHS = {
     "/logout",
     "/api/auth/token",
     "/api/auth/login",
+    "/api/login",
     "/api/auth/logout",
     "/api/healthz",
     "/sub",

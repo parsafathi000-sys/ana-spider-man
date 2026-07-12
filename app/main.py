@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.api import (
@@ -38,8 +39,9 @@ from app.bootstrap import (
 from app.core.auth_middleware import AuthMiddleware
 from app.core.config import settings
 from app.core.logging import log
-from app.database import dispose_engine, get_sessionmaker, init_db
+from app.database import dispose_engine, get_db, get_sessionmaker, init_db
 from app.domains import manager as domain_manager
+from app.schemas import TokenRequest
 from app.xray.builder import write_config
 from app.xray.process import manager
 
@@ -165,6 +167,15 @@ async def login_page(request: Request):
         if payload and "sub" in payload:
             return RedirectResponse(url="/dashboard", status_code=302)
     return templates.TemplateResponse(request=request, name="login.html", context={})
+
+
+# JSON login alias at /api/login (matches the frontend's expected contract).
+# Delegates to the auth router's shared handler so behavior stays identical.
+@app.post("/api/login")
+async def api_login_alias(response: Response, payload: TokenRequest, db: AsyncSession = Depends(get_db)):
+    from app.api.auth import _do_login
+
+    return await _do_login(response, payload.username, payload.password, db)
 
 
 @app.get("/logout")

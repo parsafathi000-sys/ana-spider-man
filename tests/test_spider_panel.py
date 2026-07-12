@@ -757,3 +757,47 @@ def test_remote_rejects_unauthenticated(tmp_db):
     # No token at all -> 401
     assert c.get("/api/remote/status").status_code == 401
 
+
+# ---------------------------------------------------------------------------
+# Tests: login page must be self-contained (no api/TOKEN/ME globals)
+# ---------------------------------------------------------------------------
+def test_login_page_uses_native_fetch(tmp_db):
+    """login.html must POST JSON to /api/login via fetch and NOT depend on the
+    SPA globals (api/TOKEN/ME) that are undefined on this standalone page."""
+    from app.main import app
+
+    c = TestClient(app)
+    html = c.get("/login").text
+    assert "fetch(\"/api/login\"" in html or "fetch('/api/login'" in html
+    # The broken global references must be gone from the handler code.
+    assert "api('/auth/token'" not in html
+    # No bare references to the SPA globals the old handler relied on.
+    assert "TOKEN = data" not in html
+    assert "ME = data" not in html
+
+
+def test_api_login_authenticates(tmp_db):
+    """POST /api/login returns a token for valid creds and 401 otherwise."""
+    from app.main import app
+    from app.bootstrap import ensure_admin
+    import asyncio
+
+    async def _seed():
+        await init_db()
+        maker = get_sessionmaker()
+        async with maker() as s:
+            await ensure_admin(s)
+
+    asyncio.run(_seed())
+
+    c = TestClient(app)
+    ok = c.post("/api/login", json={"username": "admin", "password": "testpass123"})
+    assert ok.status_code == 200
+    assert "access_token" in ok.json()
+
+    bad = c.post("/api/login", json={"username": "admin", "password": "nope"})
+    assert bad.status_code == 401
+    # Generic message (no username enumeration), not a raw JS error.
+    assert bad.json()["detail"] == "Invalid username or password"
+
+
