@@ -1,7 +1,8 @@
 /* ===================================================================
-   Spider Panel — Console SPA shell
-   Fixed left sidebar + no-reload section router + Browser/Clipboard/Remote.
-   Reuses globals from base.html: api(), toast(), esc(), fmtBytes(), logout().
+   Spider Panel — consolidated admin console (SPA shell)
+   Single authenticated shell. A fixed left sidebar switches
+   sections WITHOUT page reloads. Every section pulls real data
+   from the existing JSON APIs. No emojis — SVG icons only.
    =================================================================== */
 (() => {
   "use strict";
@@ -10,49 +11,43 @@
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
   /* ---------- Section registry (single source of truth) ---------- */
-  // icon: inline SVG path data (24x24). badge: optional promise -> number.
+  // icon: inline SVG path data (24x24, stroke=currentColor). No emojis.
   const I = {
-    grid: '<path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/>',
-    xray: '<path d="M12 2l9 5v10l-9 5-9-5V7zM12 2v20M2 7l20 10M22 7L2 17"/>',
-    sliders: '<path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12M20 18h0M16 18a2 2 0 104 0 2 2 0 10-4 0"/>',
-    plug: '<path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 01-12 0zM12 17v5"/>',
-    logs: '<path d="M4 4h16v16H4zM7 9h10M7 13h10M7 17h6"/>',
-    globe: '<path d="M12 2a10 10 0 100 20 10 10 0 000-20zM2 12h20M12 2c3 3 3 17 0 20M12 2c-3 3-3 17 0 20"/>',
-    cursor: '<path d="M4 4l7 16 2-7 7-2z"/>',
-    gear: '<path d="M12 8a4 4 0 100 8 4 4 0 000-8zM3 12h2M19 12h2M12 3v2M12 19v2M5 5l1 1M18 18l1 1M5 19l1-1M18 6l1-1"/>',
-    download: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
-    info: '<path d="M12 2a10 10 0 100 20 10 10 0 000-20zM12 10v6M12 7h0"/>',
+    home: '<path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10"/>',
+    news: '<path d="M4 5h13v14H4zM8 9h5M8 13h5M8 17h3"/><path d="M18 8h2v11h-2"/>',
+    users: '<path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87M16 3.13A4 4 0 01 16 11"/>',
+    inbound: '<rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 14h.01M12 14h.01M16 14h.01"/>',
+    domain: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18 0M12 3a14 14 0 010-18 0"/>',
+    chrome: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v6M21 12h-6M12 21v-6M3 12h6"/>',
+    logs: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h10M7 17h6"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 001.09 1.83l.06.05a2 2 0 110 2.83 2.83l-.06-.05a1.65 1.65 0 001.83-1.09V14a2 2 0 11.27-2l.05.06a1.65 1.65 0 001.09-1.83l.06-.05a2 2 0 11-2.83-2.83l-.06.05A1.65 1.65 0 00-1.83-1.09H9a1.65 1.65 0 00-1.83 1.09l-.05.06A2 2 0 11.27 12H2a2 2 0 110-2 2l.05.06A1.65 1.65 0 001.09 15" transform="translate(0 .5)"/>',
   };
 
   const SECTIONS = [
-    { id: "dashboard",  label: "Dashboard",       icon: I.grid,    title: "Dashboard",      kbd: "1", badge: null },
-    { id: "xray",       label: "Xray Mgmt",       icon: I.xray,    title: "Xray Management", kbd: "2", badge: null },
-    { id: "configs",    label: "Configurations",  icon: I.sliders, title: "Configurations",  kbd: "3", badge: null },
-    { id: "connections",label: "Connections",     icon: I.plug,    title: "Connections",     kbd: "4", badge: "online" },
-    { id: "logs",       label: "Logs",            icon: I.logs,    title: "Logs",            kbd: "5", badge: null },
-    { id: "browser",    label: "Browser",         icon: I.globe,   title: "Browser",         kbd: "6", badge: null },
-    { id: "remote",     label: "Remote Control",  icon: I.cursor,  title: "Remote Control",  kbd: "7", badge: null },
-    { id: "settings",   label: "Settings",        icon: I.gear,    title: "Settings",        kbd: "8", badge: null },
-    { id: "installs",   label: "Installations",   icon: I.download,title: "Installations",   kbd: "9", badge: null },
-    { id: "about",      label: "About",           icon: I.info,    title: "About",           kbd: "0", badge: null },
+    { id: "home",     label: "Home",      icon: I.home,     title: "Home",      kbd: "1" },
+    { id: "news",     label: "News",      icon: I.news,     title: "News",      kbd: "2" },
+    { id: "users",    label: "Users",     icon: I.users,    title: "Users",     kbd: "3" },
+    { id: "inbounds", label: "Inbound",   icon: I.inbound,  title: "Inbound Management", kbd: "4" },
+    { id: "domains",  label: "Domain",    icon: I.domain,   title: "Domain Management", kbd: "5" },
+    { id: "chrome",   label: "Chrome",    icon: I.chrome,   title: "Chrome",    kbd: "6" },
+    { id: "logs",     label: "Xray Logs", icon: I.logs,     title: "Xray Logs", kbd: "7" },
+    { id: "settings", label: "Settings",   icon: I.settings,  title: "Settings",   kbd: "8" },
   ];
 
   const RENDERERS = {
-    dashboard: renderDashboard,
-    xray: renderXray,
-    configs: renderConfigs,
-    connections: renderConnections,
+    home: renderHome,
+    news: renderNews,
+    users: renderUsers,
+    inbounds: renderInbounds,
+    domains: renderDomains,
+    chrome: renderChrome,
     logs: renderLogs,
-    browser: renderBrowser,
-    remote: renderRemote,
     settings: renderSettings,
-    installs: renderInstalls,
-    about: renderAbout,
   };
 
   /* ---------- State ---------- */
-  let current = "dashboard";
-  let electronMode = false; // becomes true if a host agent reports in
+  let current = "home";
+  let music = { enabled: false, volume: 70, random: false, track: "", files: [], prefix: "/musics/" };
 
   /* ---------- Boot ---------- */
   function buildNav() {
@@ -62,20 +57,9 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${s.icon}</svg>
         <span class="nav-label">${s.label}</span>
         ${s.kbd ? `<span class="nav-kbd">${s.kbd}</span>` : ""}
-        ${s.badge ? `<span class="nav-badge" id="badge-${s.id}" hidden>0</span>` : ""}
         <span class="tip">${s.label} <kbd>${s.kbd}</kbd></span>
       </button>`).join("");
     $$(".nav-item", nav).forEach((b) => (b.onclick = () => showView(b.dataset.view)));
-    refreshBadges();
-  }
-
-  async function refreshBadges() {
-    try {
-      const s = await api("/dashboard/stats");
-      const online = s.online_connections || 0;
-      const el = $("#badge-connections");
-      if (el) { el.textContent = online; el.hidden = online === 0; }
-    } catch { /* non-fatal */ }
   }
 
   function bindShell() {
@@ -92,11 +76,11 @@
     const saved = localStorage.getItem("spider_theme");
     if (saved) document.documentElement.setAttribute("data-theme", saved);
 
-    // Keyboard shortcuts: 1-9/0 switch sections; "[" collapses sidebar.
+    // Keyboard shortcuts: 1-8 switch sections; "[" collapses sidebar.
     document.addEventListener("keydown", (e) => {
       if (e.target.matches("input, textarea")) return;
       if (e.key === "[") { $("#console").classList.toggle("collapsed"); return; }
-      const map = { "1":"dashboard","2":"xray","3":"configs","4":"connections","5":"logs","6":"browser","7":"remote","8":"settings","9":"installs","0":"about" };
+      const map = { "1":"home","2":"news","3":"users","4":"inbounds","5":"domains","6":"chrome","7":"logs","8":"settings" };
       if (map[e.key]) showView(map[e.key]);
     });
     pollConnection();
@@ -117,38 +101,53 @@
 
   /* ---------- Router (no reload) ---------- */
   async function showView(name) {
-    if (!RENDERERS[name]) name = "dashboard";
+    if (!RENDERERS[name]) name = "home";
     current = name;
     $$(".nav-item").forEach((n) => n.classList.toggle("active", n.dataset.view === name));
     const sec = SECTIONS.find((s) => s.id === name);
     $("#view-title").textContent = sec ? sec.title : name;
     $("#console").classList.remove("nav-open");
     const root = $("#content");
-    // skeleton
     root.innerHTML = `<div class="skeleton-wrap"><div class="skeleton-bar"></div><div class="skeleton-bar short"></div><div class="skeleton-card"></div></div>`;
     try {
-      const html = document.createElement("div");
-      html.className = "view-enter";
+      const host = document.createElement("div");
+      host.className = "view-enter";
       root.innerHTML = "";
-      root.appendChild(html);
-      await RENDERERS[name](html);
+      root.appendChild(host);
+      await RENDERERS[name](host);
     } catch (e) {
       root.innerHTML = `<div class="panel glass"><p class="error-text" role="alert">${esc(e.message)}</p></div>`;
     }
   }
 
   /* ===================================================================
-     SECTION RENDERERS
-     Each renders into `root` (a .view-enter div). They pull real data
-     from the existing JSON APIs so the console is genuinely functional.
+     SHARED HELPERS
      =================================================================== */
-
   async function cardGrid(pairs) {
     return `<div class="grid cards">${pairs.map(([k,v,sub]) => `
       <div class="card glass"><div class="k">${k}</div><div class="v">${v}</div><div class="sub">${sub||""}</div></div>`).join("")}</div>`;
   }
 
-  async function renderDashboard(root) {
+  function svgIcon(kind) {
+    // small inline svg helper for buttons (24x24, stroke currentColor)
+    const paths = {
+      copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>',
+      qr: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
+      edit: '<path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 00 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>',
+      key: '<rect x="2" y="2" width="20" height="20" rx="2"/><path d="M6 12h12"/>',
+      trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>',
+      plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+      play: '<path d="M8 5v14l11-7z"/>',
+      pause: '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>',
+      next: '<path d="M5 4l10 8-10 8zM19 5v14"/>',
+    };
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths[kind]||""}</svg>`;
+  }
+
+  /* ===================================================================
+     HOME
+     =================================================================== */
+  async function renderHome(root) {
     const s = await api("/dashboard/stats");
     const st = s.extra || {};
     const storage = st.storage || {};
@@ -167,281 +166,688 @@
         <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
           <div><div class="k">Xray</div><div class="v" style="font-size:20px">${s.xray_running ? "Up" : "Down"}</div></div>
           <div><div class="k">PID</div><div class="v" style="font-size:20px">${s.xray_pid ?? "—"}</div></div>
-          <div><div class="k">Auto-restart</div><div class="v" style="font-size:20px">${st.auto_restart ? "On" : "—"}</div></div>
+          <div><div class="k">Auto-restart</div><div class="v" style="font-size:20px">${st.auto_restart ? "On" : "—"}</div>
         </div>
         <div class="row-actions" style="margin-top:14px">
-          <button class="btn btn-sm" id="d-restart">⟳ Restart Xray</button>
-          <button class="btn btn-sm" id="d-config">⚡ View Config</button>
+          <button class="btn btn-sm" id="d-restart">${svgIcon("")} Restart Xray</button>
+          <button class="btn btn-sm" id="d-config">View Config</button>
         </div>
         <pre class="codebox" id="d-cfg" hidden></pre>
       </div>`;
-    root.querySelector("#d-restart").onclick = async () => { try { await api("/system/xray/restart", { method: "POST" }); toast("Xray restart sent"); } catch (e) { toast(e.message, "err"); } };
+    root.querySelector("#d-restart").onclick = async () => { try { await api("/system/restart", { method: "POST" }); toast("Xray restart sent"); } catch (e) { toast(e.message, "err"); } };
     root.querySelector("#d-config").onclick = async () => {
       const pre = root.querySelector("#d-cfg");
       try { const c = await api("/xray/config"); pre.textContent = JSON.stringify(c, null, 2); pre.hidden = false; } catch (e) { toast(e.message, "err"); }
     };
   }
 
-  async function renderXray(root) {
-    const ins = await api("/inbounds");
-    root.innerHTML = `<div class="panel glass"><h3>XRAY INBOUNDS</h3>
-      <div class="grid cards">${ins.map((i) => `
-        <div class="card glass"><div class="k">${esc(i.name || i.tag)}</div>
-          <div class="v" style="font-size:16px">${esc(i.protocol)} / ${esc(i.security)}</div>
-          <div class="sub">${esc(i.network)} · :${i.port}</div></div>`).join("")}</div>
-      <p class="muted" style="color:var(--txt-dim);font-size:12px;margin-top:10px">Full inbound editor lives in the Connections / Configurations pages.</p>
+  /* ===================================================================
+     NEWS
+     =================================================================== */
+  async function renderNews(root) {
+    root.innerHTML = `<div class="panel glass"><h3>NEWS</h3>
+      <div class="row-actions" style="margin-bottom:12px">
+        <input id="news-q" class="field" style="margin:0;flex:1;min-width:160px" placeholder="Search (default: Iran)">
+        <button class="btn btn-sm" id="news-go">Search</button>
+      </div>
+      <div id="news-list" class="muted" style="font-size:13px">Loading…</div></div>`;
+    const list = root.querySelector("#news-list");
+    const load = async (q) => {
+      list.innerHTML = `<div class="muted">Loading…</div>`;
+      try {
+        const r = await api(`/news?query=${encodeURIComponent(q || "Iran")}&limit=12`);
+        if (!r.items || !r.items.length) { list.innerHTML = `<div class="muted">No news available right now.</div>`; return; }
+        list.innerHTML = r.items.map((it) => `
+          <a class="news-item glass" href="${esc(it.link || "#")}" target="_blank" rel="noopener" style="display:block;padding:12px 14px;margin-bottom:10px;border-radius:12px;text-decoration:none;color:inherit">
+            <div style="font-weight:600;font-size:14px">${esc(it.title)}</div>
+            <div class="muted" style="font-size:12px;margin-top:4px">${esc((it.text || "").slice(0, 180))}${(it.text||"").length>180?"…":""}</div>
+            <div class="muted" style="font-size:11px;margin-top:6px;color:var(--neon-soft)">${esc(it.source||"")} · ${esc(it.published||"")}</div>
+          </a>`).join("");
+      } catch (e) { list.innerHTML = `<div class="error-text">${esc(e.message)}</div>`; }
+    };
+    root.querySelector("#news-go").onclick = () => load(root.querySelector("#news-q").value.trim());
+    root.querySelector("#news-q").addEventListener("keydown", (e) => { if (e.key === "Enter") load(e.target.value.trim()); });
+    load("Iran");
+  }
+
+  /* ===================================================================
+     USERS
+     =================================================================== */
+  async function renderUsers(root) {
+    const users = await api("/users");
+    const cards = users.map((u) => userCard(u)).join("");
+    root.innerHTML = `
+      <div class="panel glass">
+        <div class="panel-head"><h3>USERS</h3><span class="spacer"></span>
+          <input id="user-search" class="field" style="margin:0;max-width:200px" placeholder="search…">
+          <button class="btn btn-primary neon btn-sm" id="add-user">${svgIcon("plus")} Add</button>
+        </div>
+        ${users.length ? `<div class="cards" style="margin-top:12px">${cards}</div>` : `<p class="muted" style="margin-top:12px">No users yet.</p>`}
+      </div>`;
+    root.querySelector("#add-user").onclick = () => userForm(null);
+    root.querySelector("#user-search").oninput = async (e) => {
+      const q = e.target.value.trim();
+      const list = await api("/users" + (q ? `?search=${encodeURIComponent(q)}` : ""));
+      const wrap = root.querySelector(".cards");
+      wrap.innerHTML = list.map(userCard).join("") || `<p class="muted">No users</p>`;
+      bindUserCards(root);
+    };
+    bindUserCards(root);
+  }
+
+  function userCard(u) {
+    const expired = u.status === "expired" || !u.enabled;
+    return `<div class="card glass user-card" data-id="${u.id}">
+      <div class="panel-head" style="margin-bottom:8px">
+        <h3 style="margin:0;font-size:15px">${esc(u.username)}</h3>
+        <span class="badge ${u.status}">${u.status}</span>
+      </div>
+      <div class="kv"><span>UUID</span><code>${esc(u.uuid.slice(0,8))}…</code></div>
+      <div class="kv"><span>Expire</span><span>${u.expire_at ? fmtDate(u.expire_at) : "Never"}</span></div>
+      <div class="kv"><span>Traffic</span><span>${fmtBytes(u.used_traffic_bytes)} / ${u.traffic_limit_bytes ? fmtBytes(u.traffic_limit_bytes) : "∞"}</span></div>
+      <div class="row-actions" style="margin-top:10px;flex-wrap:wrap">
+        <button class="btn btn-sm btn-min" data-act="qr" title="QR Code">${svgIcon("qr")}</button>
+        <button class="btn btn-sm btn-min" data-act="copycfg" title="Copy Config">${svgIcon("copy")}</button>
+        <button class="btn btn-sm btn-min" data-act="copysub" title="Copy Subscription">${svgIcon("copy")}</button>
+        <button class="btn btn-sm" data-act="edit" title="Edit">${svgIcon("edit")}</button>
+        <button class="btn btn-sm" data-act="reset" title="Reset UUID">${svgIcon("key")}</button>
+        <button class="btn btn-sm ${u.enabled ? "" : "btn-ok"}" data-act="toggle" data-en="${u.enabled}" title="${u.enabled ? "Disable" : "Enable"}">${u.enabled ? "Disable" : "Enable"}</button>
+        <button class="btn btn-sm btn-ghost danger" data-act="del" title="Delete">${svgIcon("trash")}</button>
+      </div>
     </div>`;
   }
 
-  async function renderConfigs(root) {
-    const cfg = await api("/settings");
-    root.innerHTML = `<div class="panel glass"><h3>CONFIGURATIONS</h3>
-      <pre class="codebox">${esc(JSON.stringify(cfg, null, 2))}</pre></div>`;
+  function bindUserCards(root) {
+    root.querySelectorAll("[data-act]").forEach((b) => {
+      b.onclick = async () => {
+        const id = b.dataset.id;
+        try {
+          if (b.dataset.act === "qr") showUserQR(Number(id));
+          else if (b.dataset.act === "copycfg") { const u = await api(`/users/${id}`); const d = await api(`/sub/${u.uuid}?format=json`); copyText(d.uris.join("\n"), "Config copied"); }
+          else if (b.dataset.act === "copysub") { const u = await api(`/users/${id}`); copyText(location.origin + "/sub/" + u.uuid, "Subscription copied"); }
+          else if (b.dataset.act === "edit") userForm(Number(id));
+          else if (b.dataset.act === "reset") { await api(`/users/${id}/reset-uuid`, { method: "POST" }); toast("UUID reset"); renderUsers(); }
+          else if (b.dataset.act === "toggle") { await api(`/users/${id}/${b.dataset.en === "true" ? "disable" : "enable"}`, { method: "POST" }); toast("Updated"); renderUsers(); }
+          else if (b.dataset.act === "del") { if (!confirm("Delete this user?")) return; await api(`/users/${id}`, { method: "DELETE" }); toast("User deleted"); renderUsers(); }
+        } catch (e) { toast(e.message, "err"); }
+      };
+    });
   }
 
-  async function renderConnections(root) {
-    const users = await api("/users");
-    root.innerHTML = `<div class="panel glass"><h3>CONNECTIONS (${users.length} users)</h3>
-      <table class="table"><thead><tr><th>User</th><th>Status</th><th>Traffic</th><th>IP Limit</th></tr></thead><tbody>
-      ${users.map((u) => `<tr><td data-label="User">${esc(u.username)}</td>
-        <td data-label="Status"><span class="badge ${u.status}">${u.status}</span></td>
-        <td data-label="Traffic">${fmtBytes(u.used_traffic_bytes)} / ${u.traffic_limit_bytes ? fmtBytes(u.traffic_limit_bytes) : "∞"}</td>
-        <td data-label="IP Limit">${u.ip_limit || "∞"}</td></tr>`).join("")}
-      </tbody></table></div>`;
+  async function showUserQR(id) {
+    const u = await api(`/users/${id}`);
+    const d = await api(`/sub/${u.uuid}?format=json`).catch(() => ({ uris: [] }));
+    const cfg = d.uris[0] || "";
+    openModal(`<h3>QR — ${esc(u.username)}</h3>
+      <div style="display:flex;justify-content:center;padding:12px">
+        <img src="/api/qr/${esc(u.uuid)}" alt="qr" style="width:240px;height:240px;background:#fff;border-radius:12px">
+      </div>
+      <div class="field"><label>VLESS URI</label><textarea class="codebox" readonly style="min-height:90px">${esc(cfg)}</textarea></div>
+      <div class="field"><label>Subscription URL</label><input readonly value="${esc(location.origin + "/sub/" + u.uuid)}" class="codebox"></div>
+      <div class="modal-actions">
+        <button class="btn" data-c="1">Copy Config</button>
+        <button class="btn" data-s="1">Copy Sub</button>
+        <button class="btn modal-close">Close</button>
+      </div>`);
+    document.querySelector("#modal-card [data-c]").onclick = () => copyText(cfg, "Config copied");
+    document.querySelector("#modal-card [data-s]").onclick = () => copyText(location.origin + "/sub/" + u.uuid, "Sub copied");
   }
 
-  async function renderLogs(root) {
-    root.innerHTML = `<div class="panel glass"><h3>XRAY LOGS</h3>
-      <pre class="codebox" id="logbox" style="min-height:320px">Loading…</pre>
-      <div class="row-actions" style="margin-top:10px"><button class="btn btn-sm" id="log-refresh">↻ Refresh</button></div></div>`;
-    const box = root.querySelector("#logbox");
-    const load = async () => { try { const r = await api("/xray/logs"); box.textContent = (r.logs || "").slice(-8000) || "(empty)"; } catch (e) { box.textContent = e.message; } };
-    root.querySelector("#log-refresh").onclick = load;
-    load();
+  function userForm(id) {
+    const isEdit = !!id;
+    if (isEdit) {
+      api(`/users/${id}`).then((u) => { openModal(buildUserForm(u)); bindUserForm(id); }).catch((e) => toast(e.message, "err"));
+    } else { openModal(buildUserForm({})); bindUserForm(null); }
   }
 
-  async function renderSettings(root) {
-    const me = await api("/auth/me");
-    root.innerHTML = `<div class="panel glass"><h3>SETTINGS</h3>
-      <div class="setting-row"><div><div class="k">Account</div><div class="sub">${esc(me.username)}</div></div></div>
-      <div class="setting-row"><div><div class="k">Change credentials</div><div class="sub">Update admin username / password</div></div>
-        <button class="btn btn-sm" id="s-chg">Change</button></div>
-      <p class="muted" style="color:var(--txt-dim);font-size:12px">Full settings surface (music, theme, xray) is available via /settings.</p></div>`;
-    root.querySelector("#s-chg").onclick = async () => {
-      const pw = prompt("New password (min 6):");
-      if (!pw) return;
-      try { await api("/auth/change-credentials", { method: "POST", body: { new_password: pw } }); toast("Password updated"); }
+  function buildUserForm(u) {
+    return `<h3>${u.id ? "EDIT USER" : "CREATE USER"}</h3>
+      <form id="user-f" style="display:flex;flex-direction:column;gap:12px">
+        ${!u.id ? `<div class="field"><label>Username<input type="text" name="username" value="${esc(u.username || "")}" required></label></div>` : ""}
+        <div class="field"><label>Password (leave blank to keep / auto-generate)<input type="password" name="password" placeholder="${u.id ? "••••••••" : "auto-generate if empty"}"></label></div>
+        <div class="field-row">
+          <div class="field"><label>Expire (days, 0 = never)<input name="expire_days" type="number" min="0" placeholder="0 = never"></label></div>
+          <div class="field"><label>Traffic limit (GB)<input name="traffic_limit_gb" type="number" min="0" step="0.1" value="${u.traffic_limit_gb || 0}"></label></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>IP limit (0=∞)<input name="ip_limit" type="number" min="0" value="${u.ip_limit || 0}"></label></div>
+          <div class="field"><label>Inbound tags (comma separated, empty = all)<input name="inbound_tags" value="${esc((u.inbound_tags||[]).join ? u.inbound_tags.join(",") : esc(u.inbound_tags||""))}"></label></div>
+        </div>
+        <label class="switch"><input type="checkbox" name="enabled" ${u.enabled !== false ? "checked" : ""}> <span class="slider"></span></label> <span class="k">Enabled</span>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost modal-close">Cancel</button>
+          <button type="submit" class="btn btn-primary neon">${u.id ? "Save" : "Create"}</button>
+        </div>
+      </form>`;
+  }
+
+  function bindUserForm(id) {
+    const modal = document.getElementById("modal");
+    const form = document.getElementById("user-f");
+    const isEdit = !!id;
+    modal.querySelector(".modal-close").onclick = () => { modal.hidden = true; };
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const body = {
+        expire_days: fd.get("expire_days") ? Number(fd.get("expire_days")) : null,
+        traffic_limit_gb: Number(fd.get("traffic_limit_gb") || 0),
+        ip_limit: Number(fd.get("ip_limit") || 0),
+        enabled: fd.get("enabled") === "on",
+        inbound_tags: fd.get("inbound_tags") ? fd.get("inbound_tags").split(",").map((s) => s.trim()).filter(Boolean) : [],
+      };
+      const pwd = fd.get("password");
+      if (pwd) body.password = pwd;
+      const exp = fd.get("expire_days");
+      if (exp) body.expire_days = Number(exp);
+      try {
+        if (isEdit) { await api(`/users/${id}`, { method: "PUT", body }); toast("User updated"); }
+        else { body.username = fd.get("username"); await api("/users", { method: "POST", body }); toast("User created"); }
+        modal.hidden = true; renderUsers();
+      } catch (e) { toast(e.message, "err"); }
+    };
+  }
+
+  /* ===================================================================
+     INBOUNDS
+     =================================================================== */
+  async function renderInbounds(root) {
+    const list = await api("/inbounds");
+    const cards = list.map(inboundCard).join("");
+    root.innerHTML = `
+      <div class="panel glass">
+        <div class="panel-head"><h3>INBOUNDS</h3><span class="spacer"></span>
+          <button class="btn btn-primary neon btn-sm" id="add-ib">${svgIcon("plus")} New Inbound</button>
+        </div>
+        ${list.length ? `<div class="cards" style="margin-top:12px">${cards}</div>` : `<p class="muted" style="margin-top:12px">No inbounds yet.</p>`}
+      </div>`;
+    root.querySelector("#add-ib").onclick = () => inboundForm(null);
+    bindInboundCards(root);
+  }
+
+  function inboundCard(ib) {
+    return `<div class="card glass" data-id="${ib.id}">
+      <div class="panel-head" style="margin-bottom:8px">
+        <h3 style="margin:0;font-size:15px">${esc(ib.name || ib.tag)}</h3>
+        <span class="badge ${ib.enabled ? "active" : "disabled"}">${ib.enabled ? "on" : "off"}</span>
+      </div>
+      <div class="kv"><span>Type</span><span>${esc(ib.security)} / ${esc(ib.network)}</span></div>
+      <div class="kv"><span>Domain</span><span>${esc(ib.domain || "—")}</span></div>
+      <div class="kv"><span>Port</span><span>${ib.port}${ib.external_port && ib.external_port !== ib.port ? ` (ext:${ib.external_port})` : ""}</span></div>
+      ${ib.security === "reality" ? `<div class="kv"><span>Reality</span><span>pbk:${esc((ib.public_key||"").slice(0,10))}…</span></div>` : ""}
+      <div class="row-actions" style="margin-top:10px;flex-wrap:wrap">
+        <button class="btn btn-sm" data-act="edit" title="Edit">${svgIcon("edit")}</button>
+        <button class="btn btn-sm" data-act="keys" title="Regenerate Reality keys">${svgIcon("key")}</button>
+        <button class="btn btn-sm btn-ghost danger" data-act="del" title="Delete">${svgIcon("trash")}</button>
+      </div>
+    </div>`;
+  }
+
+  function bindInboundCards(root) {
+    root.querySelectorAll('[data-act="edit"]').forEach((b) => b.onclick = () => inboundForm(Number(b.dataset.id)));
+    root.querySelectorAll('[data-act="keys"]').forEach((b) => b.onclick = async () => {
+      try { await api(`/inbounds/${b.dataset.id}/regen-keys`, { method: "POST" }); toast("Reality keys regenerated"); renderInbounds(); }
+      catch (e) { toast(e.message, "err"); }
+    });
+    root.querySelectorAll('[data-act="del"]').forEach((b) => b.onclick = async () => {
+      if (!confirm("Delete inbound?")) return;
+      try { await api(`/inbounds/${b.dataset.id}`, { method: "DELETE" }); toast("Deleted"); renderInbounds(); }
+      catch (e) { toast(e.message, "err"); }
+    });
+  }
+
+  function inboundForm(id) {
+    const isEdit = id != null;
+    openModal(`<h3>${isEdit ? "EDIT INBOUND" : "NEW INBOUND"}</h3>
+      <form id="ib-f">
+        <div class="field-row">
+          <div class="field"><label>Tag<input name="tag" required ${isEdit ? "disabled" : ""}></label></div>
+          <div class="field"><label>Name<input name="name"></label></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Domain (per-inbound; blank=active)<input name="domain" placeholder="vpn.example.com"></label></div>
+          <div class="field"><label>External port (client)<input name="external_port" type="number" min="1" max="65535" placeholder="Railway TCP port"></label></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Internal port (bind)<input name="port" type="number" min="1" max="65535" value="8443"></label></div>
+          <div class="field"><label>Security<select name="security"><option value="reality">reality</option><option value="tls">tls</option><option value="none">none</option></select></label></div>
+          <div class="field"><label>Network<select name="network"><option value="xhttp">xhttp</option><option value="ws">ws</option><option value="tcp">tcp</option></select></label></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Server name (Reality dest)<input name="server_name" placeholder="target.com:443"></label></div>
+          <div class="field"><label>SpiderX<input name="spider_x" value="/"></label></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Path<input name="transport_path" value="/"></label></div>
+          <div class="field"><label>WS Host (ws only)<input name="ws_host" placeholder="optional"></label></div>
+        </div>
+        <div class="field"><label>Enabled<input name="enabled" value="1"></label></div>
+        <div class="modal-actions"><button type="button" class="btn btn-ghost modal-close">Cancel</button>
+          <button class="btn btn-primary neon">Save</button></div>
+      </form>`);
+    const form = document.getElementById("ib-f");
+    if (isEdit) {
+      api(`/inbounds/${id}`).then((ib) => {
+        Object.keys(ib).forEach((k) => {
+          const el = form.querySelector(`[name="${k}"]`);
+          if (el) { if (el.type === "checkbox") el.checked = ib[k]; else if (el.type === "select-one") el.value = ib[k]; else el.value = ib[k] ?? ""; }
+        });
+      }).catch((e) => toast(e.message, "err"));
+    }
+    document.querySelector(".modal-close").onclick = () => closeModal();
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const f = Object.fromEntries(new FormData(form).entries());
+      const payload = {
+        name: f.name, port: Number(f.port), security: f.security, network: f.network,
+        server_name: f.server_name, spider_x: f.spider_x, transport_path: f.transport_path,
+        domain: f.domain || "", ws_host: f.ws_host, xhttp_mode: f.xhttp_mode,
+        external_port: f.external_port ? Number(f.external_port) : null,
+        enabled: f.enabled === "1",
+      };
+      if (!isEdit) payload.tag = f.tag;
+      try { if (isEdit) await api(`/inbounds/${id}`, { method: "PUT", body: payload }); else await api("/inbounds", { method: "POST", body: payload }); closeModal(); toast("Saved"); renderInbounds(); }
       catch (e) { toast(e.message, "err"); }
     };
   }
 
-  async function renderInstalls(root) {
-    root.innerHTML = `<div class="panel glass"><h3>INSTALLATIONS</h3>
-      <p class="muted" style="color:var(--txt-dim)">Installation helpers (certbot, xray binary, systemd) are invoked from the host. This panel shows status only.</p>
-      <div class="grid cards">
-        <div class="card glass"><div class="k">Xray Binary</div><div class="v" style="font-size:16px">${esc((await safeHealth()).binary || "—")}</div></div>
-        <div class="card glass"><div class="k">Version</div><div class="v" style="font-size:16px">${esc((await safeHealth()).version || "—")}</div></div>
-      </div></div>`;
-  }
-  async function safeHealth() { try { return await api("/system/xray/health"); } catch { return {}; } }
-
-  async function renderAbout(root) {
-    root.innerHTML = `<div class="panel glass"><h3>ABOUT</h3>
-      <p>Spider Panel — Xray Core Management Console.</p>
-      <p class="muted" style="color:var(--txt-dim)">Cyberpunk dark console. Sections switch without page reloads.
-      The Browser page embeds a webview in iframe mode; full Chromium + OS-level Remote Control require the Electron host agent.</p>
-      <p style="font-size:12px;color:var(--txt-dim)">Remote driver mode: <span id="about-drv">…</span></p></div>`;
-    try { const r = await api("/remote/status"); $("#about-drv").textContent = r.mode + " — " + r.note; } catch {}
+  /* ===================================================================
+     DOMAINS
+     =================================================================== */
+  async function renderDomains(root) {
+    const list = await api("/domains");
+    const cards = list.map((d) => `
+      <div class="card glass">
+        <div class="panel-head" style="margin-bottom:8px">
+          <h3 style="margin:0;font-size:15px">${esc(d.domain)}</h3>
+          ${d.is_active ? '<span class="badge active">ACTIVE</span>' : ""}
+        </div>
+        <div class="kv"><span>Note</span><span>${esc(d.note || "—")}</span></div>
+        <div class="row-actions" style="margin-top:10px;flex-wrap:wrap">
+          ${d.is_active ? "" : `<button class="btn btn-sm btn-ok" data-act="act">Activate</button>`}
+          <button class="btn btn-sm btn-ghost danger" data-act="del" data-d="${esc(d.domain)}">${svgIcon("trash")}</button>
+        </div>
+      </div>`).join("");
+    root.innerHTML = `
+      <div class="panel glass">
+        <div class="panel-head"><h3>DOMAINS</h3><span class="spacer"></span></div>
+        <p class="muted" style="font-size:12px">The active domain is used for Reality SNI, TLS, and subscription links.</p>
+        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+          <input id="dom-in" class="field" style="flex:1;min-width:200px;margin:0" placeholder="example.com">
+          <button class="btn btn-primary neon btn-sm" id="add-dom">${svgIcon("plus")} Add</button>
+        </div>
+        ${list.length ? `<div class="cards">${cards}</div>` : `<p class="muted">No domains yet.</p>`}
+      </div>`;
+    root.querySelector("#add-dom").onclick = async () => {
+      const dom = root.querySelector("#dom-in").value.trim();
+      if (!dom) return;
+      try { await api("/domains", { method: "POST", body: { domain: dom } }); toast("Added"); renderDomains(); } catch (e) { toast(e.message, "err"); }
+    };
+    root.querySelectorAll("[data-act]").forEach((b) => {
+      b.onclick = async () => {
+        const d = b.dataset.d;
+        try {
+          if (b.dataset.act === "act") { await api(`/domains/${encodeURIComponent(d)}/activate`, { method: "POST" }); toast("Activated + config reloaded"); renderDomains(); }
+          else if (b.dataset.act === "del") { if (confirm(`Delete ${d}?`)) { await api(`/domains/${encodeURIComponent(d)}`, { method: "DELETE" }); toast("Deleted"); renderDomains(); } }
+        } catch (e) { toast(e.message, "err"); }
+      };
+    });
   }
 
   /* ===================================================================
-     BROWSER PAGE (iframe mode)
+     CHROME (embedded browser)
      =================================================================== */
-  let tabs = [];
-  let activeTab = null;
-
+  let chromeTabs = [];
+  let chromeActive = null;
+  async function renderChrome(root) {
+    if (chromeTabs.length === 0) addChromeTab("https://www.google.com");
+    root.innerHTML = `
+      <div class="panel glass">
+        <h3>CHROME</h3>
+        <div class="tabs" id="ctabs"></div>
+        <div class="browser-chrome">
+          <button class="icon-btn" id="b-back" title="Back" aria-label="Back">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <button class="icon-btn" id="b-fwd" title="Forward" aria-label="Forward">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+          <button class="icon-btn" id="b-refresh" title="Refresh" aria-label="Refresh">${svgIcon("")}</button>
+          <button class="icon-btn" id="b-home" title="Home" aria-label="Home">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10"/></svg>
+          </button>
+          <div class="addr"><input id="b-addr" placeholder="Search Google or type a URL" aria-label="Address or search" autocomplete="off">
+            <button class="btn btn-sm" id="b-go">Go</button></div>
+          <button class="icon-btn" id="b-newtab" title="New tab" aria-label="New tab">${svgIcon("plus")}</button>
+        </div>
+        <div class="browser-frame-wrap">
+          <div class="browser-loading" id="b-load"></div>
+          <iframe class="browser-frame" id="b-frame" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"></iframe>
+        </div>
+        <p class="muted" style="color:var(--txt-dim);font-size:11px;margin-top:8px">
+          Embedded browser (iframe mode): navigation, back/forward, refresh, tabs and address/search work.
+          Cross-origin sites may block embedding (X-Frame-Options/CSP). Downloads/uploads and per-site cookies need the Electron build.</p>
+      </div>`;
+    const frame = $("#b-frame");
+    const addr = $("#b-addr");
+    let zoom = 1;
+    const load = (url) => {
+      if (!url) return;
+      $("#b-load").classList.add("on");
+      frame.src = url; addr.value = url; chromeActive.url = url; renderChromeTabs();
+    };
+    frame.onload = () => { $("#b-load").classList.remove("on"); try { addr.value = frame.contentWindow.location.href; chromeActive.url = addr.value; } catch {} };
+    frame.onerror = () => $("#b-load").classList.remove("on");
+    $("#b-go").onclick = () => load(normalizeUrl(addr.value));
+    addr.addEventListener("keydown", (e) => { if (e.key === "Enter") load(normalizeUrl(addr.value)); });
+    $("#b-refresh").onclick = () => { $("#b-load").classList.add("on"); try { frame.contentWindow.location.reload(); } catch { frame.src = frame.src; } };
+    $("#b-home").onclick = () => load(chromeActive.home || "https://www.google.com");
+    $("#b-back").onclick = () => { try { frame.contentWindow.history.back(); } catch { toast("Back not available in iframe mode", "err"); } };
+    $("#b-fwd").onclick = () => { try { frame.contentWindow.history.forward(); } catch { toast("Forward not available in iframe mode", "err"); } };
+    $("#b-newtab").onclick = () => { addChromeTab("https://www.google.com"); load(chromeActive.url); };
+    load(chromeActive.url);
+  }
   function normalizeUrl(input) {
     const v = input.trim();
     if (!v) return null;
     if (/^https?:\/\//i.test(v) || /^file:\/\//i.test(v)) return v;
-    if (/^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(v) && !/\s/.test(v)) return "https://" + v; // example.com -> open
-    return "https://www.google.com/search?q=" + encodeURIComponent(v); // ChatGPT -> search Google
+    if (/^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(v) && !/\s/.test(v)) return "https://" + v;
+    return "https://www.google.com/search?q=" + encodeURIComponent(v);
   }
-
-  async function renderBrowser(root) {
-    if (tabs.length === 0) addTab("https://www.google.com");
-    root.innerHTML = `
-      <div class="tabs" id="tabs"></div>
-      <div class="browser-chrome">
-        <button class="icon-btn" id="b-back" title="Back" aria-label="Back">‹</button>
-        <button class="icon-btn" id="b-fwd" title="Forward" aria-label="Forward">›</button>
-        <button class="icon-btn" id="b-refresh" title="Refresh" aria-label="Refresh">⟳</button>
-        <button class="icon-btn" id="b-home" title="Home" aria-label="Home">⌂</button>
-        <div class="addr"><input id="b-addr" placeholder="Search Google or type a URL" aria-label="Address or search" autocomplete="off">
-          <button class="btn btn-sm" id="b-go">Go</button></div>
-        <div class="zoom">
-          <button class="icon-btn" id="b-zout" title="Zoom out" aria-label="Zoom out">−</button>
-          <span id="b-zoom" style="min-width:42px;text-align:center">100%</span>
-          <button class="icon-btn" id="b-zin" title="Zoom in" aria-label="Zoom in">+</button>
-        </div>
-        <button class="icon-btn" id="b-full" title="Fullscreen" aria-label="Fullscreen">⛶</button>
-        <button class="icon-btn" id="b-newtab" title="New tab" aria-label="New tab">＋</button>
-      </div>
-      <div class="browser-frame-wrap">
-        <div class="browser-loading" id="b-load"></div>
-        <iframe class="browser-frame" id="b-frame" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"></iframe>
-      </div>
-      <p class="muted" style="color:var(--txt-dim);font-size:11px;margin-top:8px">
-        Embedded browser runs in <b>iframe mode</b>: navigation, back/forward, refresh, tabs, zoom, fullscreen and address/search work.
-        Cross-origin sites may block embedding (X-Frame-Options/CSP). Downloads/uploads/cookies per-site control require the Electron <code>webview</code> build.</p>`;
-
-    const frame = $("#b-frame");
-    const addr = $("#b-addr");
-    let zoom = 1;
-
-    const load = (url) => {
-      if (!url) return;
-      $("#b-load").classList.add("on");
-      frame.src = url;
-      addr.value = url;
-      activeTab.url = url;
-      renderTabs();
-    };
-    frame.onload = () => { $("#b-load").classList.remove("on"); try { addr.value = frame.contentWindow.location.href; activeTab.url = addr.value; } catch {} };
-    frame.onerror = () => $("#b-load").classList.remove("on");
-
-    $("#b-go").onclick = () => load(normalizeUrl(addr.value));
-    addr.addEventListener("keydown", (e) => { if (e.key === "Enter") load(normalizeUrl(addr.value)); });
-    $("#b-refresh").onclick = () => { $("#b-load").classList.add("on"); try { frame.contentWindow.location.reload(); } catch { frame.src = frame.src; } };
-    $("#b-home").onclick = () => load(activeTab.home || "https://www.google.com");
-    $("#b-back").onclick = () => { try { frame.contentWindow.history.back(); } catch { toast("Back not available in iframe mode", "err"); } };
-    $("#b-fwd").onclick = () => { try { frame.contentWindow.history.forward(); } catch { toast("Forward not available in iframe mode", "err"); } };
-    $("#b-zin").onclick = () => { zoom = Math.min(2, zoom + 0.1); applyZoom(); };
-    $("#b-zout").onclick = () => { zoom = Math.max(0.5, zoom - 0.1); applyZoom(); };
-    $("#b-full").onclick = () => { const w = $(".browser-frame-wrap"); if (!document.fullscreenElement) w.requestFullscreen?.(); else document.exitFullscreen?.(); };
-    $("#b-newtab").onclick = () => { addTab("https://www.google.com"); load(activeTab.url); };
-
-    function applyZoom() { frame.style.transform = `scale(${zoom})`; frame.style.transformOrigin = "0 0"; $("#b-zoom").textContent = Math.round(zoom * 100) + "%"; }
-
-    load(activeTab.url);
+  function addChromeTab(url) {
+    const t = { id: "ct" + Date.now() + Math.random().toString(36).slice(2, 6), url, home: url, title: "New tab" };
+    chromeTabs.push(t); chromeActive = t; renderChromeTabs();
   }
-
-  function addTab(url) {
-    const t = { id: "t" + Date.now() + Math.random().toString(36).slice(2, 6), url, home: url, title: "New tab" };
-    tabs.push(t); activeTab = t; renderTabs();
-  }
-  function renderTabs() {
-    const el = $("#tabs"); if (!el) return;
-    el.innerHTML = tabs.map((t) => `
-      <div class="tab ${t === activeTab ? "active" : ""}" data-id="${t.id}">
+  function renderChromeTabs() {
+    const el = $("#ctabs"); if (!el) return;
+    el.innerHTML = chromeTabs.map((t) => `
+      <div class="tab ${t === chromeActive ? "active" : ""}" data-id="${t.id}">
         <span class="t-title">${esc(t.title || t.url || "New tab")}</span>
-        <span class="t-close" data-close="${t.id}" title="Close">✕</span>
+        <span class="t-close" data-close="${t.id}" title="Close">${svgIcon("trash")}</span>
       </div>`).join("");
     $$(".tab", el).forEach((tab) => {
       tab.onclick = (e) => {
-        if (e.target.dataset.close) { closeTab(e.target.dataset.close); return; }
-        activeTab = tabs.find((x) => x.id === tab.dataset.id); renderTabs();
-        const f = $("#b-frame"); if (f) { f.src = activeTab.url; $("#b-addr").value = activeTab.url; }
+        if (e.target.dataset.close) { closeChromeTab(e.target.dataset.close); return; }
+        chromeActive = chromeTabs.find((x) => x.id === tab.dataset.id); renderChromeTabs();
+        const f = $("#b-frame"); if (f) { f.src = chromeActive.url; $("#b-addr").value = chromeActive.url; }
       };
     });
   }
-  function closeTab(id) {
-    const i = tabs.findIndex((t) => t.id === id); if (i < 0) return;
-    tabs.splice(i, 1);
-    if (tabs.length === 0) addTab("https://www.google.com");
-    if (activeTab.id === id) activeTab = tabs[Math.max(0, i - 1)];
-    renderTabs(); const f = $("#b-frame"); if (f) f.src = activeTab.url;
+  function closeChromeTab(id) {
+    const i = chromeTabs.findIndex((t) => t.id === id); if (i < 0) return;
+    chromeTabs.splice(i, 1);
+    if (chromeTabs.length === 0) addChromeTab("https://www.google.com");
+    if (chromeActive && chromeActive.id === id) chromeActive = chromeTabs[Math.max(0, i - 1)];
+    renderChromeTabs(); const f = $("#b-frame"); if (f) f.src = chromeActive.url;
   }
 
   /* ===================================================================
-     REMOTE CONTROL PAGE (loopback driver; agent-ready)
+     XRAY LOGS
      =================================================================== */
-  async function renderRemote(root) {
-    let driverNote = "";
-    try { const r = await api("/remote/status"); electronMode = r.mode === "agent"; driverNote = r.note; } catch { driverNote = "remote status unavailable"; }
+  async function renderLogs(root) {
+    const last = await api("/xray/last-result").catch(() => ({}));
     root.innerHTML = `
-      <div class="panel glass" style="max-width:560px">
-        <h3>REMOTE MOUSE</h3>
-        <p class="muted" style="color:var(--txt-dim);font-size:12px">Drag on the touchpad to move the cursor; buttons send click intents to the active driver.
-        ${electronMode ? "" : "<br><b>Loopback demo:</b> " + esc(driverNote)}</p>
-        <div class="touchpad" id="tp" role="application" aria-label="Touchpad — drag to move cursor">
-          <div class="cur" id="tp-cur" style="left:50%;top:50%"></div>
+      <div class="panel glass">
+        <h3>XRAY LOGS</h3>
+        <div class="row-actions" style="margin-bottom:10px">
+          <button class="btn btn-sm" id="logs-pause">${svgIcon("pause")} Pause</button>
+          <button class="btn btn-sm" id="logs-clear">${svgIcon("trash")} Clear</button>
+          <button class="btn btn-sm" id="logs-copy">${svgIcon("copy")} Copy</button>
+          <input type="text" id="logs-search" class="field" style="margin:0;max-width:200px;padding:6px 10px" placeholder="Search logs…">
         </div>
-        <div class="fp-grid" style="margin-top:12px">
-          <button class="btn btn-sm" data-m="left">Left</button>
-          <button class="btn btn-sm" data-m="right">Right</button>
-          <button class="btn btn-sm" data-m="middle">Middle</button>
-          <button class="btn btn-sm" data-m="dbl">Double</button>
-          <button class="btn btn-sm" id="m-up">↑ Scroll</button>
-          <button class="btn btn-sm" id="m-dn">↓ Scroll</button>
-          <button class="btn btn-sm" id="m-drag">Drag Start</button>
-          <button class="btn btn-sm" id="m-dragend">Drag End</button>
-          <button class="btn btn-sm" id="m-reset">Reset</button>
+        <p class="muted" style="font-size:12px">Live tail of xray stdout/stderr. If Xray failed to start, the exact parser error appears here.</p>
+        ${last && last.error ? `<div class="error-text" style="white-space:pre-wrap;font-size:12px;margin-bottom:10px">${esc(last.error)}</div>` : ""}
+        <pre id="logs-box" class="codebox" style="min-height:50vh;max-height:70vh;overflow:auto;font-size:11px;background:#0a0008;border:1px solid var(--glass-brd);border-radius:10px;padding:12px;color:var(--neon-soft);font-family:'JetBrains Mono',monospace"></pre>
+      </div>`;
+    const box = root.querySelector("#logs-box");
+    let paused = false;
+    let ws = null;
+    const token = localStorage.getItem("spider_token");
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    const connect = () => {
+      ws = new WebSocket(`${proto}//${location.host}/api/xray/logs/stream?token=${encodeURIComponent(token)}`);
+      ws.onmessage = (e) => { if (!paused) { box.textContent += e.data + "\n"; box.scrollTop = box.scrollHeight; } };
+      ws.onclose = () => { if (!paused) setTimeout(connect, 2000); };
+      ws.onerror = () => { try { ws.close(); } catch {} };
+    };
+    connect();
+    root.querySelector("#logs-pause").onclick = () => {
+      paused = !paused;
+      const b = root.querySelector("#logs-pause");
+      b.innerHTML = paused ? `${svgIcon("play")} Resume` : `${svgIcon("pause")} Pause`;
+    };
+    root.querySelector("#logs-clear").onclick = () => { box.textContent = ""; };
+    root.querySelector("#logs-copy").onclick = () => { navigator.clipboard.writeText(box.textContent).then(() => toast("Logs copied")).catch(() => toast("Failed to copy", "err")); };
+    root.querySelector("#logs-search").oninput = (e) => {
+      const q = e.target.value.toLowerCase();
+      const lines = box.textContent.split("\n");
+      box.textContent = (q ? lines.filter((l) => l.toLowerCase().includes(q)) : lines).join("\n");
+    };
+    api("/xray/logs?limit=400").then((d) => { box.textContent = (d.lines || []).join("\n"); box.scrollTop = box.scrollHeight; }).catch(() => {});
+  }
+
+  /* ===================================================================
+     SETTINGS (account, music, theme, telegram)
+     =================================================================== */
+  async function renderSettings(root) {
+    const s = await api("/settings");
+    const m = s.music || { enabled: false, volume: 70, random: false, track: "", files: [], prefix: "/musics/" };
+    music = { enabled: m.enabled, volume: m.volume, random: m.random, track: m.track, files: m.files || [], prefix: m.prefix || "/musics/" };
+    const tgHandle = "amirsplder";
+    root.innerHTML = `
+      <div class="panel glass" style="margin-top:16px">
+        <h3>ACCOUNT</h3>
+        <div class="setting-row"><div><div class="k">Username</div><div class="sub">${esc(s.admin_username || "admin")}</div></div></div>
+        <div class="setting-row"><div><div class="k">Email</div><div class="sub">${esc(s.admin_email || "(none)")}</div></div></div>
+        <div class="setting-row"><div><div class="k">Data directory</div><div class="sub">${esc(s.data_dir || "/app/data")}</div></div></div>
+        <div class="setting-row"><div><div class="k">Log level</div><div class="sub">${esc(s.log_level || "INFO")}</div></div></div>
+        <div class="setting-row" style="border:none">
+          <button class="btn btn-sm" id="cred-open">Change credentials</button>
         </div>
-        <div class="row-actions" style="margin-top:12px"><button class="btn btn-sm" id="m-status">Driver status</button></div>
       </div>
 
-      <div class="panel glass" style="max-width:560px;margin-top:16px">
-        <h3>CLIPBOARD</h3>
-        <textarea class="field clip-box" id="clip" placeholder="Copied text appears here…" aria-label="Clipboard contents"></textarea>
-        <div class="row-actions" style="margin-top:10px">
-          <button class="btn btn-sm" id="c-paste">Paste</button>
-          <button class="btn btn-sm" id="c-copy">Copy</button>
-          <button class="btn btn-sm btn-ghost danger" id="c-clear">Clear</button>
-          <button class="btn btn-sm" id="c-refresh">Refresh</button>
+      <div class="panel glass" style="margin-top:16px">
+        <h3>BACKGROUND MUSIC</h3>
+        <div class="setting-row">
+          <div><div class="k">Music</div><div class="sub">Play a random ambient track when the panel opens</div></div>
+          <label class="switch"><input type="checkbox" id="m-on" ${m.enabled ? "checked" : ""}> <span class="slider"></span></label>
         </div>
-        <p class="muted" style="color:var(--txt-dim);font-size:11px;margin-top:8px">Paste injects into the page's currently focused text field (best-effort). Copy reads the local clipboard.</p>
+        <div class="setting-row">
+          <div><div class="k">Volume</div><div class="sub" id="m-vol-label">${m.volume}%</div></div>
+          <input type="range" id="m-vol" min="0" max="100" value="${m.volume}" style="accent-color:var(--neon);max-width:220px">
+        </div>
+        <div class="setting-row">
+          <div><div class="k">Random track</div><div class="sub">Pick a different track each session</div></div>
+          <label class="switch"><input type="checkbox" id="m-rand" ${m.random ? "checked" : ""}> <span class="slider"></span></label>
+        </div>
+        <div class="setting-row">
+          <div><div class="k">Selected track</div><div class="sub">Choose a specific file (ignored when Random is on)</div></div>
+          <select id="m-track" style="max-width:260px">
+            <option value="">${m.random ? "(random)" : "(first / random)"}</option>
+            ${(m.files || []).map((f) => `<option value="${esc(f)}" ${m.track === f ? "selected" : ""}>${esc(f)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="row-actions" id="m-test" style="margin-top:8px">
+          <button class="btn btn-sm" id="m-next">${svgIcon("next")} Next Track</button>
+          <button class="btn btn-sm" id="m-play">${m.enabled ? svgIcon("pause") + " Pause" : svgIcon("play") + " Play"}</button>
+        </div>
+        ${m.files && m.files.length === 0 ? `<p class="muted" style="font-size:12px;margin-top:10px">No music files found in <code>app/static/musics/</code>. Drop .mp3/.ogg/.wav there.</p>` : ""}
+      </div>
+
+      <div class="panel glass" style="margin-top:16px">
+        <h3>APPEARANCE</h3>
+        <div class="setting-row">
+          <div><div class="k">Panel theme</div><div class="sub">Switch between dark and light</div></div>
+          <button class="btn btn-sm" id="m-theme">Toggle theme</button>
+        </div>
+      </div>
+
+      <div class="panel glass" style="margin-top:16px">
+        <h3>TELEGRAM CONTACT</h3>
+        <div class="setting-row">
+          <div><div class="k">Telegram handle</div><div class="sub">Shown on the floating contact button</div></div>
+          <input id="tg-handle" class="field" style="max-width:220px;margin:0" value="@${tgHandle}">
+        </div>
+        <p class="muted" style="font-size:12px">The floating glass button links to <code>https://t.me/${tgHandle}</code> and stays pinned top-left, above the sidebar.</p>
+      </div>
+
+      <div class="panel glass" style="margin-top:16px">
+        <h3>XRAY CONFIG</h3>
+        <div class="row-actions">
+          <button class="btn btn-sm" id="validate-btn">Validate Config</button>
+          <button class="btn btn-sm" id="reload-btn">Reload Config</button>
+          <button class="btn btn-sm" id="restart-btn">Restart Xray</button>
+        </div>
+        <div id="validate-out" class="muted" style="font-size:12px;white-space:pre-wrap"></div>
       </div>`;
 
-    const tp = $("#tp"), cur = $("#tp-cur");
-    let dragging = false, draggingActive = false;
-    const sendMove = (clientX, clientY) => {
-      const r = tp.getBoundingClientRect();
-      const x = Math.round(((clientX - r.left) / r.width) * 100);
-      const y = Math.round(((clientY - r.top) / r.height) * 100);
-      cur.style.left = ((clientX - r.left) / r.width) * 100 + "%";
-      cur.style.top = ((clientY - r.top) / r.height) * 100 + "%";
-      api("/remote/mouse/move", { method: "POST", body: { x, y, smooth: true } }).catch(() => {});
+    // ----- credentials -----
+    root.querySelector("#cred-open").onclick = () => openModal(`
+      <h3>CHANGE CREDENTIALS</h3>
+      <form id="cred-form" style="display:flex;flex-direction:column;gap:12px">
+        <div class="field"><label>Current password<input type="password" name="current_password" required></label></div>
+        <div class="field"><label>New username (optional)<input type="text" name="new_username" placeholder="leave blank to keep"></label></div>
+        <div class="field"><label>New password (optional)<input type="password" name="new_password" placeholder="min 6 chars"></label></div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost modal-close">Cancel</button>
+          <button type="submit" class="btn btn-primary neon">Update</button>
+        </div>
+      </form>`);
+    document.querySelector("#modal-card .modal-close").onclick = () => closeModal();
+    document.querySelector("#cred-form").onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const body = {
+        current_password: fd.get("current_password"),
+        new_username: fd.get("new_username") || undefined,
+        new_password: fd.get("new_password") || undefined,
+      };
+      try { await api("/auth/change-credentials", { method: "POST", body }); toast("Credentials updated"); closeModal(); }
+      catch (e) { toast(e.message, "err"); }
     };
-    tp.addEventListener("pointerdown", (e) => { dragging = true; tp.setPointerCapture(e.pointerId); sendMove(e.clientX, e.clientY); });
-    tp.addEventListener("pointermove", (e) => { if (dragging) sendMove(e.clientX, e.clientY); });
-    tp.addEventListener("pointerup", () => { dragging = false; });
 
-    $$("[data-m]", root).forEach((b) => b.onclick = () => {
-      const m = b.dataset.m;
-      if (m === "dbl") api("/remote/mouse/click", { method: "POST", body: { button: "left", double: true } }).catch(() => {});
-      else api("/remote/mouse/click", { method: "POST", body: { button: m } }).catch(() => {});
-    });
-    $("#m-up").onclick = () => api("/remote/mouse/scroll", { method: "POST", body: { dx: 0, dy: -120 } }).catch(() => {});
-    $("#m-dn").onclick = () => api("/remote/mouse/scroll", { method: "POST", body: { dx: 0, dy: 120 } }).catch(() => {});
-    $("#m-drag").onclick = () => { draggingActive = true; api("/remote/mouse/drag", { method: "POST", body: { x: 50, y: 50, start: true } }).catch(() => {}); toast("Drag started"); };
-    $("#m-dragend").onclick = () => { draggingActive = false; api("/remote/mouse/drag", { method: "POST", body: { x: 50, y: 50, start: false } }).catch(() => {}); toast("Drag ended"); };
-    $("#m-reset").onclick = () => { cur.style.left = "50%"; cur.style.top = "50%"; api("/remote/mouse/move", { method: "POST", body: { x: 50, y: 50, smooth: true } }).catch(() => {}); };
-    $("#m-status").onclick = async () => { try { const r = await api("/remote/status"); toast("Driver: " + r.mode); } catch (e) { toast(e.message, "err"); } };
-
-    const clip = $("#clip");
-    $("#c-refresh").onclick = async () => { try { const r = await api("/remote/clipboard"); clip.value = r.text; } catch { try { clip.value = await navigator.clipboard.readText(); } catch {} } };
-    $("#c-copy").onclick = async () => { try { await navigator.clipboard.writeText(clip.value); api("/remote/clipboard", { method: "POST", body: { text: clip.value } }).catch(() => {}); toast("Copied to clipboard"); } catch (e) { toast(e.message, "err"); } };
-    $("#c-clear").onclick = () => { clip.value = ""; api("/remote/clipboard", { method: "POST", body: { text: "" } }).catch(() => {}); };
-    $("#c-paste").onclick = async () => {
-      // Paste into the currently focused field on THIS page (best-effort).
-      const active = document.activeElement;
-      if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) {
-        active.value = clip.value; active.dispatchEvent(new Event("input", { bubbles: true })); toast("Pasted into focused field");
-      } else {
-        try { await navigator.clipboard.writeText(clip.value); toast("Clipboard set — paste where needed (Cmd/Ctrl+V)"); }
-        catch (e) { toast(e.message, "err"); }
-      }
+    // ----- music -----
+    const setMusic = async (key, value) => {
+      try { await api("/settings", { method: "POST", body: { key, value: String(value) } }); }
+      catch (e) { toast(e.message, "err"); }
     };
-    // Seed from local clipboard
-    try { clip.value = await navigator.clipboard.readText(); } catch {}
+    root.querySelector("#m-on").onchange = (e) => { setMusic("music_enabled", e.target.checked ? "1" : "0"); music.enabled = e.target.checked; };
+    root.querySelector("#m-rand").onchange = (e) => { setMusic("music_random", e.target.checked ? "1" : "0"); music.random = e.target.checked; };
+    root.querySelector("#m-vol").oninput = (e) => {
+      const v = Number(e.target.value);
+      root.querySelector("#m-vol-label").textContent = v + "%";
+      music.volume = v;
+      const a = document.getElementById("bg-audio"); if (a) a.volume = v / 100;
+    };
+    root.querySelector("#m-vol").onchange = (e) => setMusic("music_volume", e.target.value);
+    root.querySelector("#m-track").onchange = (e) => { setMusic("music_track", e.target.value); music.track = e.target.value; };
+    root.querySelector("#m-next").onclick = () => { startMusic(true); };
+    root.querySelector("#m-play").onclick = () => {
+      const a = document.getElementById("bg-audio");
+      if (a && !a.paused) { a.pause(); root.querySelector("#m-play").innerHTML = svgIcon("play") + " Play"; }
+      else { if (!a) startMusic(false); else { a.play(); root.querySelector("#m-play").innerHTML = svgIcon("pause") + " Pause"; } }
+    };
+
+    // ----- theme -----
+    root.querySelector("#m-theme").onclick = () => { $("#theme-btn").click(); };
+
+    // ----- telegram -----
+    root.querySelector("#tg-handle").onchange = (e) => {
+      const h = (e.target.value || "").replace(/^@/, "");
+      toast("Telegram handle updates require a redeploy (set at build). Preview: @" + h);
+    };
+
+    // ----- xray -----
+    root.querySelector("#validate-btn").onclick = async () => {
+      const out = root.querySelector("#validate-out");
+      out.textContent = "Validating…";
+      try { const r = await api("/xray/validate", { method: "POST" }); out.className = r.ok ? "ok" : "error-text"; out.style.whiteSpace = "pre-wrap"; out.textContent = r.ok ? "Config valid: " + (r.message || "") : r.message + "\n" + (r.stderr || ""); }
+      catch (e) { out.className = "error-text"; out.textContent = e.message; }
+    };
+    root.querySelector("#reload-btn").onclick = async () => { try { await api("/system/reload", { method: "POST" }); toast("Config reloaded"); } catch (e) { toast(e.message, "err"); } };
+    root.querySelector("#restart-btn").onclick = async () => { try { await api("/system/restart", { method: "POST" }); toast("Restarting..."); setTimeout(renderSettings, 3000); } catch (e) { toast(e.message, "err"); } };
+  }
+
+  /* ===================================================================
+     BACKGROUND MUSIC MANAGER (HTML5 audio; requires a user gesture)
+     =================================================================== */
+  function ensureAudioEl() {
+    let a = document.getElementById("bg-audio");
+    if (!a) {
+      a = document.createElement("audio");
+      a.id = "bg-audio";
+      a.loop = true;
+      a.preload = "auto";
+      document.body.appendChild(a);
+    }
+    return a;
+  }
+  function pickTrack() {
+    if (!music.files || music.files.length === 0) return null;
+    if (music.random) return music.files[Math.floor(Math.random() * music.files.length)];
+    if (music.track && music.files.includes(music.track)) return music.track;
+    return music.files[0];
+  }
+  function startMusic(forceNext) {
+    if (!music.files || music.files.length === 0) return;
+    const a = ensureAudioEl();
+    if (forceNext && a.dataset.file) {
+      const i = music.files.indexOf(a.dataset.file);
+      const nx = music.files[(i + 1) % music.files.length];
+      a.dataset.file = nx; a.src = music.prefix + encodeURIComponent(nx);
+    } else {
+      const t = pickTrack();
+      if (!t) return;
+      a.dataset.file = t; a.src = music.prefix + encodeURIComponent(t);
+    }
+    a.volume = (music.volume || 70) / 100;
+    a.play().then(() => { setMusicBar(true, a.dataset.file); }).catch(() => { /* autoplay blocked until gesture */ });
+  }
+  function setMusicBar(playing, file) {
+    const bar = document.getElementById("music-bar");
+    if (!bar) return;
+    bar.hidden = false;
+    document.getElementById("music-title").textContent = file || (music.files[0] || "—");
+    const btn = document.getElementById("music-toggle");
+    btn.innerHTML = playing
+      ? '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+    document.body.classList.toggle("music-off", !playing);
+  }
+  function bindMusicBar() {
+    const toggle = document.getElementById("music-toggle");
+    const next = document.getElementById("music-next");
+    const vol = document.getElementById("music-vol");
+    if (!toggle) return;
+    toggle.onclick = () => {
+      const a = document.getElementById("bg-audio");
+      if (a && !a.paused) { a.pause(); setMusicBar(false, a.dataset.file); }
+      else if (a) { a.play().then(() => setMusicBar(true, a.dataset.file)).catch(() => {}); }
+      else { startMusic(false); }
+    };
+    next.onclick = () => startMusic(true);
+    vol.oninput = (e) => { music.volume = Number(e.target.value); const a = document.getElementById("bg-audio"); if (a) a.volume = music.volume / 100; };
+  }
+  async function initMusic() {
+    try { const s = await api("/settings"); const m = s.music || {}; music = { enabled: m.enabled, volume: m.volume, random: m.random, track: m.track, files: m.files || [], prefix: m.prefix || "/musics/" }; } catch { return; }
+    const bar = document.getElementById("music-bar");
+    if (bar) { bar.hidden = false; document.getElementById("music-vol").value = music.volume || 70; }
+    if (music.enabled && music.files.length) {
+      // Autoplay needs a user gesture in browsers. Play on first interaction.
+      const kick = () => { startMusic(false); window.removeEventListener("pointerdown", kick); window.removeEventListener("keydown", kick); };
+      window.addEventListener("pointerdown", kick, { once: true });
+      window.addEventListener("keydown", kick, { once: true });
+    }
   }
 
   /* ---------- Init ---------- */
   buildNav();
   bindShell();
-  // Determine initial section from hash, default dashboard
-  const hash = (location.hash || "#dashboard").slice(1);
-  showView(SECTIONS.find((s) => s.id === hash) ? hash : "dashboard");
+  bindMusicBar();
+  initMusic();
+  // Determine initial section from ?tab= (legacy redirect support) or default home.
+  const params = new URLSearchParams(location.search);
+  const tab = params.get("tab");
+  showView(SECTIONS.find((s) => s.id === tab) ? tab : "home");
   window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (SECTIONS.find((s) => s.id === h)) showView(h); });
 })();

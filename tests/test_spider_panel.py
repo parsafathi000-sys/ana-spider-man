@@ -100,7 +100,7 @@ def test_login_page_renders(tmp_db):
 
 
 def test_authenticated_pages_render(tmp_db):
-    """Every authenticated TemplateResponse route renders 200 with a valid token."""
+    """Dashboard SPA renders 200; legacy section routes 302-redirect into it."""
     from app.main import app
     from app.bootstrap import ensure_admin
     import asyncio
@@ -122,19 +122,36 @@ def test_authenticated_pages_render(tmp_db):
     # the page routes, so authenticate via the cookie like a real browser does.
     c.cookies.set("spider_token", tok)
     h = {"Accept": "text/html"}
-    for path, marker in (
-        ("/dashboard", "Dashboard"),
-        ("/users", "Users"),
-        ("/inbounds", "Inbounds"),
-        ("/domains", "Domains"),
-        ("/settings", "Settings"),
-        ("/system", "System"),
-        ("/xray", "Xray"),
-        ("/sub", "Spider"),
+
+    # The single consolidated console shell.
+    r = c.get("/dashboard", headers=h, follow_redirects=False)
+    assert r.status_code == 200, f"/dashboard -> {r.status_code}"
+    assert "Console" in r.text
+
+    # Legacy per-section URLs redirect INTO the SPA (each opening a tab).
+    for path, tab in (
+        ("/users", "users"),
+        ("/inbounds", "inbounds"),
+        ("/domains", "domains"),
+        ("/settings", "settings"),
+        ("/system", "system"),
+        ("/xray", "logs"),
     ):
         r = c.get(path, headers=h, follow_redirects=False)
-        assert r.status_code == 200, f"{path} -> {r.status_code}"
-        assert marker in r.text, f"{path} did not render {marker}"
+        assert r.status_code == 302, f"{path} -> {r.status_code}"
+        assert r.headers["location"] == f"/dashboard?tab={tab}", r.headers.get("location")
+
+    # Public subscription page (no auth) renders its own template.
+    r = c.get("/sub", headers=h, follow_redirects=False)
+    assert r.status_code == 200, f"/sub -> {r.status_code}"
+    assert "Spider" in r.text
+
+    # Unauthenticated access to the console redirects to /login
+    # (verified with a fresh client that has NO session cookie).
+    c2 = TestClient(app)
+    r2 = c2.get("/dashboard", headers=h, follow_redirects=False)
+    assert r2.status_code in (307, 308, 302), r2.status_code
+    assert r2.headers["location"] == "/login", r2.headers.get("location")
 
 
 
@@ -620,10 +637,13 @@ def test_music_list_empty(tmp_db):
 
     c = TestClient(app)
     tok = c.post("/api/auth/token", data={"username": "admin", "password": "testpass123"}).json()["access_token"]
-    r = c.get("/api/settings/music/list", headers={"Authorization": f"Bearer {tok}"})
+    r = c.get("/api/settings", headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code == 200
-    # musics dir exists (gitkeep only) -> no audio files
-    assert r.json()["files"] == []
+    # musics dir exists (generated tracks now present) -> files listed
+    assert "music" in r.json()
+    assert "files" in r.json()["music"]
+    assert r.json()["music"]["enabled"] is False
+    assert r.json()["music"]["volume"] == 70
 
 
 def test_music_list_lists_audio(tmp_db, monkeypatch):
@@ -723,8 +743,8 @@ def test_app_shell_requires_auth(tmp_db):
     from app.main import app
 
     c = TestClient(app)
-    r = c.get("/app", follow_redirects=False)
-    # Unauthenticated: AuthMiddleware returns 401 for non-html; browser gets 302.
+    r = c.get("/dashboard", follow_redirects=False)
+    # Unauthenticated: AuthMiddleware returns 302 to /login for text/html.
     assert r.status_code in (401, 302)
 
 
@@ -732,7 +752,7 @@ def test_app_shell_renders_with_auth(tmp_db):
     from app.main import app
 
     c, h = _auth_headers(tmp_db)
-    r = c.get("/app")
+    r = c.get("/dashboard")
     assert r.status_code == 200
     assert "sidebar-fixed" in r.text
     assert "app_shell.js" in r.text

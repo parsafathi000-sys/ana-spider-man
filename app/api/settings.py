@@ -25,7 +25,10 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 # Keys the panel cares about. New keys can be added freely; this is the allow-list
 # the frontend exposes as toggles so arbitrary rows don't leak into the UI.
 KNOWN_KEYS = (
-    "music_on_open",  # "1" = play a random track when the panel opens
+    "music_enabled",    # "1" = background music on
+    "music_volume",     # "0.0".."1.0" player volume
+    "music_random",     # "1" = pick a random track on open
+    "music_track",      # selected file name (empty = first/random)
 )
 
 
@@ -60,15 +63,51 @@ class SettingSet(BaseModel):
     value: str
 
 
+def _normalize(key: str, value: str) -> str:
+    """Validate + coerce a setting value before persisting."""
+    if key == "music_volume":
+        try:
+            v = max(0, min(100, int(float(value))))
+        except (ValueError, TypeError):
+            v = 70
+        return str(v)
+    if key in ("music_enabled", "music_random"):
+        # accept "1"/"true"/"on" as enabled, else "0"
+        return "1" if str(value).strip().lower() in ("1", "true", "on", "yes") else "0"
+    if key == "music_track":
+        # Only allow a track name that actually exists in the music dir.
+        if value and value not in list_music_files():
+            return ""
+        return value
+    return value
+
+
 @router.get("")
 async def get_settings(_: AdminUser = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     res = await db.execute(select(Setting))
     rows = res.scalars().all()
     data = {r.key: r.value for r in rows}
-    # ensure known keys always reported (default = off)
+    # ensure known keys always reported (default = off / empty)
     for k in KNOWN_KEYS:
         data.setdefault(k, "")
-    return data
+    files = list_music_files()
+    # Volume as integer percent (default 70).
+    vol = 70
+    try:
+        vol = max(0, min(100, int(float(data["music_volume"]))))
+    except (ValueError, TypeError):
+        vol = 70
+    return {
+        "settings": data,
+        "music": {
+            "enabled": data["music_enabled"] == "1",
+            "volume": vol,
+            "random": data["music_random"] == "1",
+            "track": data["music_track"],
+            "files": files,
+            "url_prefix": "/musics/",
+        },
+    }
 
 
 @router.post("")
@@ -81,12 +120,13 @@ async def set_setting(
         from fastapi import HTTPException
 
         raise HTTPException(status_code=400, detail=f"Unknown setting key: {payload.key}")
+    value = _normalize(payload.key, payload.value)
     res = await db.execute(select(Setting).where(Setting.key == payload.key))
     row = res.scalar_one_or_none()
     if row is None:
-        row = Setting(key=payload.key, value=payload.value)
+        row = Setting(key=payload.key, value=value)
         db.add(row)
     else:
-        row.value = payload.value
+        row.value = value
     await db.commit()
-    return {"ok": True, "key": payload.key, "value": payload.value}
+    return {"ok": True, "key": payload.key, "value": value}

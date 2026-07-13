@@ -4,19 +4,19 @@
 {% block content %}
 <!-- Login Page - Standalone, no sidebar, no navigation -->
 <main class="auth-wrap safe-top safe-bottom">
-  <div class="auth-card glass">
+  <div class="auth-card glass" style="border:1px solid rgba(255,26,60,.55);box-shadow:0 0 30px rgba(255,26,60,.35),0 0 60px rgba(255,26,60,.18)">
     <div class="brand">
-      <div class="spider-logo" aria-hidden="true">
-        <svg viewBox="0 0 100 100" width="64" height="64">
-          <g class="legs" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round">
+      <div class="spider-logo" aria-hidden="true" style="animation:none">
+        <svg viewBox="0 0 100 100" width="72" height="72">
+          <g stroke="currentColor" stroke-width="3.5" fill="none" stroke-linecap="round">
             <path d="M50 50 L18 22 M50 50 L14 50 M50 50 L18 78 M50 50 L82 22 M50 50 L86 50 M50 50 L82 78"/>
           </g>
-          <circle class="body" cx="50" cy="50" r="14" fill="currentColor"/>
+          <circle cx="50" cy="50" r="14" fill="currentColor"/>
           <circle cx="45" cy="46" r="2.4" fill="#0a0000"/>
           <circle cx="55" cy="46" r="2.4" fill="#0a0000"/>
         </svg>
       </div>
-      <h1 class="title-neon">SPIDER PANEL</h1>
+      <h1 class="title-neon" style="letter-spacing:8px;font-size:34px">SPIDER</h1>
       <p class="subtitle">Xray Core Management</p>
     </div>
     <form id="login-form" class="auth-form" autocomplete="on">
